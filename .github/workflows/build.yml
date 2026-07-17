@@ -9,6 +9,10 @@ jobs:
   build:
     runs-on: windows-latest
 
+    env:
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg-cache
+      VCPKG_COMMIT: cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3
+
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
@@ -20,35 +24,42 @@ jobs:
       - name: Install vcpkg
         shell: pwsh
         run: |
-          git clone --depth 1 https://github.com/microsoft/vcpkg.git vcpkg
+          git clone https://github.com/microsoft/vcpkg.git vcpkg
+          git -C vcpkg checkout $env:VCPKG_COMMIT
           .\vcpkg\bootstrap-vcpkg.bat
 
       - name: Create Release-only Triplet
         shell: pwsh
         run: |
-          $tripletDir = "${{ github.workspace }}\vcpkg\triplets"
+          $tripletDir = "${{ github.workspace }}\custom-triplets"
 
           New-Item -ItemType Directory -Force -Path $tripletDir
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE
 
           @"
           set(VCPKG_TARGET_ARCHITECTURE x64)
-          set(VCPKG_CRT_LINKAGE static)
+          set(VCPKG_CRT_LINKAGE dynamic)
           set(VCPKG_LIBRARY_LINKAGE static)
           set(VCPKG_BUILD_TYPE release)
           "@ | Out-File `
               "$tripletDir\x64-windows-release.cmake"
 
-      - name: Install OpenCV
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ github.workspace }}\vcpkg-cache
+          key: vcpkg-${{ runner.os }}-x64-release-${{ env.VCPKG_COMMIT }}-v1
+          restore-keys: |
+            vcpkg-${{ runner.os }}-x64-release-${{ env.VCPKG_COMMIT }}-
+            vcpkg-${{ runner.os }}-x64-release-
+
+      - name: Install C++ dependencies
         shell: pwsh
         run: |
-          vcpkg install opencv4[core,calib3d]:x64-windows-release
-
-          dir .\vcpkg\installed\x64-windows-release\share\opencv4
-
-      - name: Install Eigen
-        shell: pwsh
-        run: |
-          vcpkg install eigen3:x64-windows-release
+          .\vcpkg\vcpkg install `
+            eigen3:x64-windows-release `
+            opencv4[core,calib3d]:x64-windows-release `
+            --overlay-triplets="${{ github.workspace }}\custom-triplets"
 
       - name: Install Python dependencies
         run: |
