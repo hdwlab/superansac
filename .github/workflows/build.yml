@@ -17,13 +17,21 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Checkout vcpkg
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: microsoft/vcpkg
+          path: vcpkg
+
       - name: Bootstrap vcpkg
-        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
+        shell: pwsh
+        run: |
+          .\vcpkg\bootstrap-vcpkg.bat
 
       - name: Create Release-only Triplet
         shell: pwsh
         run: |
-          $tripletDir = "$env:VCPKG_ROOT\triplets\community"
+          $tripletDir = "${{ github.workspace }}\vcpkg\triplets\community"
 
           New-Item -ItemType Directory -Force -Path $tripletDir
 
@@ -40,6 +48,11 @@ jobs:
         run: |
           vcpkg install opencv4[core,calib3d]:x64-windows-release
 
+      - name: Install Eigen
+        shell: pwsh
+        run: |
+          vcpkg install eigen3:x64-windows-release
+
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
@@ -49,7 +62,7 @@ jobs:
         shell: pwsh
         env:
           CMAKE_ARGS: >
-            -DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake
             -DVCPKG_TARGET_TRIPLET=x64-windows-release
         run: |
           python setup.py bdist_wheel
