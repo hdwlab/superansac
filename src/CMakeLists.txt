@@ -1,9 +1,6 @@
 # Find Eigen3
 find_package(Eigen3 REQUIRED)
 
-# Find Boost
-find_package(Boost REQUIRED COMPONENTS system)
-
 # Find OpenCV
 find_package(OpenCV REQUIRED)
 
@@ -14,10 +11,17 @@ file(GLOB_RECURSE SOURCE_FILES
 )
 
 # Core shared library
-add_library(SupeRANSAC SHARED
-  superansac.cpp
-  ${SOURCE_FILES}
-)
+if(WIN32)
+  add_library(SupeRANSAC STATIC
+    superansac.cpp
+    ${SOURCE_FILES}
+  )
+else()
+  add_library(SupeRANSAC SHARED
+    superansac.cpp
+    ${SOURCE_FILES}
+  )
+endif()
 
 # Give a unique, stable SONAME to avoid stale copies being picked at runtime
 set_target_properties(SupeRANSAC PROPERTIES
@@ -32,14 +36,12 @@ set_target_properties(SupeRANSAC PROPERTIES
 target_include_directories(SupeRANSAC PUBLIC
   ${PROJECT_SOURCE_DIR}/include
   ${EIGEN3_INCLUDE_DIR}
-  ${Boost_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
 )
 
 # Link deps
 target_link_libraries(SupeRANSAC
   Eigen3::Eigen
-  Boost::system
   ${OpenCV_LIBS}
 )
 

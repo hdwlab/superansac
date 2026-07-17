@@ -41,8 +41,87 @@
 #include "score.h"
 #include <Eigen/Core>
 #include "magsac_look_up_table.h"
-#include <boost/math/special_functions/gamma.hpp>
 #include <fstream>
+#include <iomanip>
+
+namespace {
+
+double gamma_lower_series(double a, double x)
+{
+    const int ITMAX = 100;
+    const double EPS = 3e-14;
+
+    double sum = 1.0 / a;
+    double del = sum;
+    double ap = a;
+
+    for (int n = 1; n <= ITMAX; ++n)
+    {
+        ++ap;
+        del *= x / ap;
+        sum += del;
+
+        if (std::fabs(del) < std::fabs(sum) * EPS)
+            break;
+    }
+
+    return std::exp(std::log(sum) + a * std::log(x) - x);
+}
+
+double gamma_upper_cf(double a, double x)
+{
+    const int ITMAX = 100;
+    const double EPS = 3e-14;
+    const double FPMIN = 1e-300;
+
+    double b = x + 1.0 - a;
+    double c = 1.0 / FPMIN;
+    double d = 1.0 / b;
+    double h = d;
+
+    for (int i = 1; i <= ITMAX; ++i)
+    {
+        double an = -i * (i - a);
+
+        b += 2.0;
+        d = an * d + b;
+        if (std::fabs(d) < FPMIN) d = FPMIN;
+
+        c = b + an / c;
+        if (std::fabs(c) < FPMIN) c = FPMIN;
+
+        d = 1.0 / d;
+        double del = d * c;
+        h *= del;
+
+        if (std::fabs(del - 1.0) < EPS)
+            break;
+    }
+
+    return std::exp(a * std::log(x) - x) * h;
+}
+
+double tgamma_lower(double a, double x)
+{
+    if (x < 0.0 || a <= 0.0)
+        return std::numeric_limits<double>::quiet_NaN();
+
+    if (x == 0.0)
+        return 0.0;
+
+    if (x < a + 1.0)
+    {
+        return gamma_lower_series(a, x);
+    }
+    else
+    {
+        double ga = std::tgamma(a);
+        return std::isfinite(ga) ? ga - gamma_upper_cf(a, x)
+                                 : std::numeric_limits<double>::infinity();
+    }
+}
+
+}  // namespace
 
 namespace superansac {
 namespace scoring {
@@ -81,9 +160,7 @@ class MAGSACScoring : public AbstractScoring
         
         double upperIncompleteGamma(double a, double x) const
         {
-            // boost::math::tgamma and boost::math::tgamma_upper
-            // T(a, x) = tgamma(a) - tgamma_lower(a, x)
-            return boost::math::tgamma(a) - boost::math::tgamma_lower(a, x);
+            return std::tgamma(a) - tgamma_lower(a, x);
         }
 
         // Cached pointer to the interleaved (lower, upper) row of the active DOF;
@@ -195,7 +272,7 @@ class MAGSACScoring : public AbstractScoring
             gammaTable_ = interleavedGammaLookupTable(dofIndex_); // Interleaved (lower, upper) row
             k = getK(degreesOfFreedom); //kEstimator_->getK(); // The 0.99 quantile of the distribution
             //std::cout << degreesOfFreedom << std::endl;
-            Cn = 1.0 / std::pow(2, degreesOfFreedom / 2.0) * boost::math::tgamma(degreesOfFreedom / 2.0); // Normalization constant
+            Cn = 1.0 / std::pow(2, degreesOfFreedom / 2.0) * std::tgamma(degreesOfFreedom / 2.0); // Normalization constant
             squaredSigmaMax = threshold * threshold; // The squared threshold
             squaredSigmaMaxPerTwo = squaredSigmaMax / 2.0; // The squared threshold divided by two
             squaredSigmaMaxPerFour = squaredSigmaMaxPerTwo / 2.0; // The squared threshold divided by four
@@ -271,7 +348,7 @@ class MAGSACScoring : public AbstractScoring
                     for (size_t i = 0; i < lookupTableSize; ++i)
                     {
                         double value = static_cast<double>(i) / lookupTableSize; // The value for which the incomplete gamma function is calculated
-                        lowerIncompleteGammaLookupTable[i] = boost::math::tgamma_lower((dof + 1.0) / 2.0, value); // Calculate the lower incomplete gamma function
+                        lowerIncompleteGammaLookupTable[i] = tgamma_lower((dof + 1.0) / 2.0, value); // Calculate the lower incomplete gamma function
                     }
 
                     file << "{"; // Write the lower incomplete gamma lookup table
@@ -317,7 +394,7 @@ class MAGSACScoring : public AbstractScoring
                     std::pair<double, double> gammaValues = getGammaValues(residualPerTwoTimesSquaredSigmaMax); // Get the gamma values
                     loss = squaredSigmaMaxPerTwo * gammaValues.first + squaredSigmaMaxPerFour * (gammaValues.second - value0); 
                 } else // Calculate the loss directly by using the incomplete gamma function
-                    loss = (squaredSigmaMaxPerTwo * boost::math::tgamma_lower(nPlus1Per2, residualPerTwoTimesSquaredSigmaMax) +
+                    loss = (squaredSigmaMaxPerTwo * tgamma_lower(nPlus1Per2, residualPerTwoTimesSquaredSigmaMax) +
                         squaredSigmaMaxPerFour * (upperIncompleteGamma(nMinus1Per2, residualPerTwoTimesSquaredSigmaMax) - value0)); 
 
                 // Commenting "premultiplier" as it does not affect the final result. It is just a constant.
@@ -404,7 +481,7 @@ class MAGSACScoring : public AbstractScoring
                                 gammaValues = getGammaValues(residualPerTwoTimesSquaredSigmaMax); // Get the gamma values
                                 loss = squaredSigmaMaxPerTwo * gammaValues.first + squaredSigmaMaxPerFour * (gammaValues.second - value0);
                             } else // Calculate the loss directly by using the incomplete gamma function
-                                loss = (squaredSigmaMaxPerTwo * boost::math::tgamma_lower(nPlus1Per2, residualPerTwoTimesSquaredSigmaMax) +
+                                loss = (squaredSigmaMaxPerTwo * tgamma_lower(nPlus1Per2, residualPerTwoTimesSquaredSigmaMax) +
                                     squaredSigmaMaxPerFour * (upperIncompleteGamma(nMinus1Per2, residualPerTwoTimesSquaredSigmaMax) - value0));
 
                             // Commenting "premultiplier" as it does not affect the final result. It is just a constant.
@@ -462,7 +539,7 @@ class MAGSACScoring : public AbstractScoring
                             gammaValues = getGammaValues(residualPerTwoTimesSquaredSigmaMax); // Get the gamma values
                             loss = squaredSigmaMaxPerTwo * gammaValues.first + squaredSigmaMaxPerFour * (gammaValues.second - value0);
                         } else // Calculate the loss directly by using the incomplete gamma function
-                            loss = (squaredSigmaMaxPerTwo * boost::math::tgamma_lower(nPlus1Per2, residualPerTwoTimesSquaredSigmaMax) +
+                            loss = (squaredSigmaMaxPerTwo * tgamma_lower(nPlus1Per2, residualPerTwoTimesSquaredSigmaMax) +
                                 squaredSigmaMaxPerFour * (upperIncompleteGamma(nMinus1Per2, residualPerTwoTimesSquaredSigmaMax) - value0));
 
                         // Commenting "premultiplier" as it does not affect the final result. It is just a constant.

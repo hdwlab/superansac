@@ -33,6 +33,7 @@
 
 # Build files
 build/*
+dist/*
 
 # Other
 *.pyc

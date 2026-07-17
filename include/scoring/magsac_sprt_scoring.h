@@ -17,7 +17,6 @@
 #include "score.h"
 #include <Eigen/Core>
 #include "magsac_look_up_table.h"
-#include <boost/math/special_functions/gamma.hpp>
 #include <chrono>
 #include <random>
 #include <numeric>
@@ -232,7 +231,7 @@ public:
         dofIndex_ = degreesOfFreedom - 2;  // Cache DOF index for lookup table optimization
         gammaTable_ = interleavedGammaLookupTable(dofIndex_); // Interleaved (lower, upper) row
         k  = getK(degreesOfFreedom);
-        Cn = 1.0 / std::pow(2.0, degreesOfFreedom / 2.0) * boost::math::tgamma(degreesOfFreedom / 2.0);
+        Cn = 1.0 / std::pow(2.0, degreesOfFreedom / 2.0) * std::tgamma(degreesOfFreedom / 2.0);
         squaredSigmaMax         = threshold * threshold;
         squaredSigmaMaxPerTwo   = squaredSigmaMax / 2.0;
         squaredSigmaMaxPerFour  = squaredSigmaMaxPerTwo / 2.0;
