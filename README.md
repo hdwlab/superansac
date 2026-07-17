@@ -16,7 +16,7 @@ git clone git@github.com:danini/superansac.git
 Make sure that you have the necessary OpenCV libraries installed:
 ```
 sudo apt-get update
-sudo apt-get install libopencv-dev libopencv-contrib-dev libarpack++2-dev libarpack2-dev libsuperlu-dev cmake build-essential libboost-all-dev libeigen3-dev
+sudo apt-get install libopencv-dev libopencv-contrib-dev libarpack++2-dev libarpack2-dev libsuperlu-dev cmake build-essential libeigen3-dev
 ```
 
 Install SupeRANSAC by running 

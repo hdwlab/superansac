@@ -7,6 +7,9 @@
 #include <vector>
 #include <unordered_set> 
 #include <unordered_map>
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
 
 #include "macros.h"
 
@@ -44,6 +47,18 @@ struct Xoshiro256ss {
 };
 
 // -------- Lemire mapping to [0, n) (closed -> adjust) --------
+#ifdef _MSC_VER
+inline uint64_t uniform_u64_closed(Xoshiro256ss& rng, uint64_t lo, uint64_t hi) {
+    const uint64_t n = hi - lo + 1;
+    uint64_t l, h;
+    l = _umul128(rng(), n, &h);
+    if (l < n) {
+        const uint64_t t = -n % n;
+        while (l < t) { l = _umul128(rng(), n, &h); }
+    }
+    return h + lo;
+}
+#else
 inline uint64_t uniform_u64_closed(Xoshiro256ss& rng, uint64_t lo, uint64_t hi) {
     const uint64_t n = hi - lo + 1;
     __uint128_t m = (__uint128_t)rng() * (__uint128_t)n;
@@ -54,6 +69,7 @@ inline uint64_t uniform_u64_closed(Xoshiro256ss& rng, uint64_t lo, uint64_t hi) 
     }
     return (uint64_t)(m >> 64) + lo;
 }
+#endif
 
 template <typename T>
 inline T uniform_closed(Xoshiro256ss& rng, T lo, T hi) {
@@ -92,7 +108,7 @@ public:
         return uniform_closed<_Type>(engine_, min_, max_);
     }
 
-    // Unique draws without replacement (sparse -> Floyd, dense -> partial Fisher–Yates)
+    // Unique draws without replacement (sparse -> Floyd, dense -> partial Fisher-Yates)
     FORCE_INLINE void generateUniqueRandomSet(_Type* sample, const _Type& k) {
         generateUniqueRandomSet(sample, k, max_);
     }
@@ -145,7 +161,7 @@ private:
                 if (!S.insert(t).second) S.insert(j);
             }
             size_t i = 0; for (auto v : S) sample[i++] = (_Type)v;
-        } else { // partial Fisher–Yates for dense case
+        } else { // partial Fisher-Yates for dense case
             // Reusable scratch; fully rewritten below.
             static thread_local std::vector<uint64_t> a;
             a.resize(N);

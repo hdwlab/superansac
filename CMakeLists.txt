@@ -55,7 +55,16 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_flag_if_supported(-finline-functions)
   add_compile_options($<$<CONFIG:Release>:-DNDEBUG>)
 elseif(MSVC)
-  add_compile_options($<$<CONFIG:Release>:/O2 /Oi /GL /Gy /DNDEBUG /MP /Zc:inline>)
+  add_compile_options(
+    $<$<CONFIG:Release>:/O2>
+    $<$<CONFIG:Release>:/Oi>
+    $<$<CONFIG:Release>:/GL>
+    $<$<CONFIG:Release>:/Gy>
+    $<$<CONFIG:Release>:/DNDEBUG>
+    $<$<CONFIG:Release>:/MP>
+    $<$<CONFIG:Release>:/Zc:inline>
+    $<$<CONFIG:Release>:/W0>
+  )
   add_link_options($<$<CONFIG:Release>:/LTCG>)
 endif()
 
@@ -82,11 +91,6 @@ add_compile_definitions($<$<CONFIG:Release>:EIGEN_NO_DEBUG>)
 
 # ---- Modern pybind11 finder hint (silences CMP0148 warning downstream) ----
 set(PYBIND11_FINDPYTHON ON)
-
-# ---- Optional policy for Boost finder (silences CMP0167) ----
-if(POLICY CMP0167)
-  cmake_policy(SET CMP0167 NEW)
-endif()
 
 add_subdirectory(src)
 add_subdirectory(python)
