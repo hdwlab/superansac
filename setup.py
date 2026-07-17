@@ -25,7 +25,10 @@ class CMakeBuild(build_ext):
         cmake_args = ['-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=' + extdir,
                       '-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_' + f'{cfg.upper()}={extdir}',
                       '-Dpybind11_DIR=' + pybind11.get_cmake_dir(),
-                      '-DPYTHON_EXECUTABLE=' + sys.executable]
+                      '-DPYTHON_EXECUTABLE=' + sys.executable,
+                      '-DPython_EXECUTABLE=' + sys.executable,
+                      '-DPython3_EXECUTABLE=' + sys.executable,
+                      '-DPYBIND11_FINDPYTHON=ON']
 
         if "CMAKE_ARGS" in os.environ:
             cmake_args += os.environ["CMAKE_ARGS"].split()
