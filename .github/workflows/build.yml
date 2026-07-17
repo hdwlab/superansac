@@ -17,28 +17,23 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Checkout vcpkg
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          repository: microsoft/vcpkg
-          path: vcpkg
-
-      - name: Bootstrap vcpkg
+      - name: Install vcpkg
         shell: pwsh
         run: |
+          git clone --depth 1 https://github.com/microsoft/vcpkg.git vcpkg
           .\vcpkg\bootstrap-vcpkg.bat
 
       - name: Create Release-only Triplet
         shell: pwsh
         run: |
-          $tripletDir = "${{ github.workspace }}\vcpkg\triplets\community"
+          $tripletDir = "${{ github.workspace }}\vcpkg\triplets"
 
           New-Item -ItemType Directory -Force -Path $tripletDir
 
           @"
           set(VCPKG_TARGET_ARCHITECTURE x64)
-          set(VCPKG_CRT_LINKAGE dynamic)
-          set(VCPKG_LIBRARY_LINKAGE dynamic)
+          set(VCPKG_CRT_LINKAGE static)
+          set(VCPKG_LIBRARY_LINKAGE static)
           set(VCPKG_BUILD_TYPE release)
           "@ | Out-File `
               "$tripletDir\x64-windows-release.cmake"
@@ -47,6 +42,8 @@ jobs:
         shell: pwsh
         run: |
           vcpkg install opencv4[core,calib3d]:x64-windows-release
+
+          dir .\vcpkg\installed\x64-windows-release\share\opencv4
 
       - name: Install Eigen
         shell: pwsh
