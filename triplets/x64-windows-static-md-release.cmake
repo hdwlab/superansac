@@ -10,20 +10,21 @@ get_filename_component(SUPERANSAC_REPOSITORY_ROOT
   "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 file(TO_NATIVE_PATH "${SUPERANSAC_REPOSITORY_ROOT}"
   SUPERANSAC_REPOSITORY_ROOT_NATIVE)
-file(TO_NATIVE_PATH
-  "${SUPERANSAC_REPOSITORY_ROOT}/packaging/opencv-build-info"
-  SUPERANSAC_OPENCV_BUILD_INFO_NATIVE)
 
 set(VCPKG_C_FLAGS_RELEASE
   "/pathmap:${SUPERANSAC_REPOSITORY_ROOT_NATIVE}=. /Brepro")
 set(VCPKG_CXX_FLAGS_RELEASE
-  "/pathmap:${SUPERANSAC_REPOSITORY_ROOT_NATIVE}=. /Brepro /I\"${SUPERANSAC_OPENCV_BUILD_INFO_NATIVE}\"")
+  "/pathmap:${SUPERANSAC_REPOSITORY_ROOT_NATIVE}=. /Brepro")
 
 # OpenCV normally embeds the compiler, install prefix, and full vcpkg paths in
-# cv::getBuildInformation(). Supply a stable replacement and omit /Z7 records.
+# cv::getBuildInformation(). Skip that finalization and use a project hook to
+# place a stable replacement at the generated source path. Also omit /Z7
+# records from dependency builds.
 set(VCPKG_CMAKE_CONFIGURE_OPTIONS_RELEASE
   "-DBUILD_WITH_DEBUG_INFO=OFF"
+  "-DCMAKE_PROJECT_INCLUDE=${SUPERANSAC_REPOSITORY_ROOT}/packaging/opencv-build-info/write_version_string.cmake"
   "-DOPENCV_SKIP_STATUS_FINALIZATION=ON")
 
 set(VCPKG_HASH_ADDITIONAL_FILES
-  "${SUPERANSAC_REPOSITORY_ROOT}/packaging/opencv-build-info/version_string.inc")
+  "${SUPERANSAC_REPOSITORY_ROOT}/packaging/opencv-build-info/version_string.inc"
+  "${SUPERANSAC_REPOSITORY_ROOT}/packaging/opencv-build-info/write_version_string.cmake")
