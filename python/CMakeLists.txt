@@ -18,16 +18,25 @@ target_link_libraries(pysuperansac PRIVATE SupeRANSAC)
 # not disclose hosted-tool-cache or temporary build locations.
 if(MSVC)
   get_filename_component(SUPERANSAC_PYTHON_ROOT "${Python_EXECUTABLE}" DIRECTORY)
-  file(TO_NATIVE_PATH "${SUPERANSAC_PYTHON_ROOT}"
-    SUPERANSAC_PYTHON_ROOT_NATIVE)
-  target_compile_options(pysuperansac PRIVATE
-    "/pathmap:${SUPERANSAC_PYTHON_ROOT_NATIVE}=.python")
-  foreach(SUPERANSAC_PYBIND11_INCLUDE IN LISTS pybind11_INCLUDE_DIRS)
-    file(TO_NATIVE_PATH "${SUPERANSAC_PYBIND11_INCLUDE}"
-      SUPERANSAC_PYBIND11_INCLUDE_NATIVE)
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     target_compile_options(pysuperansac PRIVATE
-      "/pathmap:${SUPERANSAC_PYBIND11_INCLUDE_NATIVE}=.pybind11")
-  endforeach()
+      "/clang:-ffile-prefix-map=${SUPERANSAC_PYTHON_ROOT}=.python")
+    foreach(SUPERANSAC_PYBIND11_INCLUDE IN LISTS pybind11_INCLUDE_DIRS)
+      target_compile_options(pysuperansac PRIVATE
+        "/clang:-ffile-prefix-map=${SUPERANSAC_PYBIND11_INCLUDE}=.pybind11")
+    endforeach()
+  else()
+    file(TO_NATIVE_PATH "${SUPERANSAC_PYTHON_ROOT}"
+      SUPERANSAC_PYTHON_ROOT_NATIVE)
+    target_compile_options(pysuperansac PRIVATE
+      "/pathmap:${SUPERANSAC_PYTHON_ROOT_NATIVE}=.python")
+    foreach(SUPERANSAC_PYBIND11_INCLUDE IN LISTS pybind11_INCLUDE_DIRS)
+      file(TO_NATIVE_PATH "${SUPERANSAC_PYBIND11_INCLUDE}"
+        SUPERANSAC_PYBIND11_INCLUDE_NATIVE)
+      target_compile_options(pysuperansac PRIVATE
+        "/pathmap:${SUPERANSAC_PYBIND11_INCLUDE_NATIVE}=.pybind11")
+    endforeach()
+  endif()
 endif()
 
 # Ensure loader finds the sibling core .so at runtime

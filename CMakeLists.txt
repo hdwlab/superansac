@@ -50,21 +50,39 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   add_flag_if_supported(-fno-trapping-math)
   add_compile_options($<$<CONFIG:Release>:-DNDEBUG>)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  add_flag_if_supported(-O3)
-  add_flag_if_supported(-march=native)
-  add_flag_if_supported(-mtune=native)
-  check_cxx_compiler_flag("-flto=thin" HAS_FLTO_THIN)
-  if(HAS_FLTO_THIN)
-    add_compile_options($<$<CONFIG:Release>:-flto=thin>)
-    add_link_options($<$<CONFIG:Release>:-flto=thin>)
+  if(MSVC)
+    add_compile_options(
+      $<$<CONFIG:Release>:/O2>
+      $<$<CONFIG:Release>:/Ob3>
+      $<$<CONFIG:Release>:/Oi>
+      $<$<CONFIG:Release>:/Gy>
+      $<$<CONFIG:Release>:/Gw>
+      $<$<CONFIG:Release>:/DNDEBUG>
+      $<$<CONFIG:Release>:/MP>
+      $<$<CONFIG:Release>:/Zc:inline>
+      $<$<CONFIG:Release>:/W0>
+      $<$<CONFIG:Release>:/clang:-O3>
+      $<$<CONFIG:Release>:/clang:-funroll-loops>
+      $<$<CONFIG:Release>:/clang:-fomit-frame-pointer>
+      $<$<CONFIG:Release>:/clang:-finline-functions>
+    )
   else()
-    add_flag_if_supported(-flto)
-    add_link_options($<$<CONFIG:Release>:-flto>)
+    add_flag_if_supported(-O3)
+    add_flag_if_supported(-march=native)
+    add_flag_if_supported(-mtune=native)
+    check_cxx_compiler_flag("-flto=thin" HAS_FLTO_THIN)
+    if(HAS_FLTO_THIN)
+      add_compile_options($<$<CONFIG:Release>:-flto=thin>)
+      add_link_options($<$<CONFIG:Release>:-flto=thin>)
+    else()
+      add_flag_if_supported(-flto)
+      add_link_options($<$<CONFIG:Release>:-flto>)
+    endif()
+    add_flag_if_supported(-funroll-loops)
+    add_flag_if_supported(-fomit-frame-pointer)
+    add_flag_if_supported(-finline-functions)
+    add_compile_options($<$<CONFIG:Release>:-DNDEBUG>)
   endif()
-  add_flag_if_supported(-funroll-loops)
-  add_flag_if_supported(-fomit-frame-pointer)
-  add_flag_if_supported(-finline-functions)
-  add_compile_options($<$<CONFIG:Release>:-DNDEBUG>)
 elseif(MSVC)
   add_compile_options(
     $<$<CONFIG:Release>:/O2>
@@ -82,12 +100,20 @@ endif()
 # clang-cl takes the Clang optimization branch above but uses the MSVC ABI.
 # Apply Windows runtime and reproducibility settings to both cl and clang-cl.
 if(MSVC)
-  file(TO_NATIVE_PATH "${PROJECT_SOURCE_DIR}" SUPERANSAC_SOURCE_PATH_NATIVE)
-  file(TO_NATIVE_PATH "${PROJECT_BINARY_DIR}" SUPERANSAC_BUILD_PATH_NATIVE)
-  add_compile_options(
-    "/pathmap:${SUPERANSAC_SOURCE_PATH_NATIVE}=."
-    "/pathmap:${SUPERANSAC_BUILD_PATH_NATIVE}=.build"
-  )
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    add_compile_options(
+      "/clang:-ffile-prefix-map=${PROJECT_SOURCE_DIR}=."
+      "/clang:-ffile-prefix-map=${PROJECT_BINARY_DIR}=.build"
+    )
+  else()
+    file(TO_NATIVE_PATH "${PROJECT_SOURCE_DIR}" SUPERANSAC_SOURCE_PATH_NATIVE)
+    file(TO_NATIVE_PATH "${PROJECT_BINARY_DIR}" SUPERANSAC_BUILD_PATH_NATIVE)
+    add_compile_options(
+      $<$<CONFIG:Release>:/experimental:deterministic>
+      "/pathmap:${SUPERANSAC_SOURCE_PATH_NATIVE}=."
+      "/pathmap:${SUPERANSAC_BUILD_PATH_NATIVE}=.build"
+    )
+  endif()
   add_link_options($<$<CONFIG:Release>:/Brepro>)
   set(CMAKE_MSVC_RUNTIME_LIBRARY
     "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
@@ -95,12 +121,12 @@ endif()
 
 # ---- Optional fast-math flags ----
 if(SUPERANSAC_ENABLE_FAST_MATH)
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  if(MSVC)
+    add_compile_options($<$<CONFIG:Release>:/fp:fast>)
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     add_flag_if_supported(-ffast-math)
     add_flag_if_supported(-fno-math-errno)
     add_flag_if_supported(-ffp-contract=fast)
-  elseif(MSVC)
-    add_compile_options($<$<CONFIG:Release>:/fp:fast>)
   endif()
 endif()
 
