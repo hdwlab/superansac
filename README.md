@@ -8,11 +8,11 @@ It provides estimators for homography, essential, fundamental matrix, rigid and 
 
 ## Installation
 
-Windows x64 wheels for CPython 3.10, 3.11, and 3.12 are published on the
+Windows x64 and Linux x86_64 wheels for CPython 3.10, 3.11, and 3.12 are published on the
 [fork's Releases page](https://github.com/hdwlab/superansac/releases). Install
 the asset matching the active Python version by its immutable release URL:
 
-```powershell
+```bash
 python -m pip install https://github.com/hdwlab/superansac/releases/download/VERSION/pysuperansac-WHEEL.whl
 ```
 
@@ -21,6 +21,12 @@ required OpenCV modules are statically linked (Eigen is header-only); only the
 Python, Windows system, and supported MSVC runtime DLLs remain dynamic dependencies.
 Visual Studio, CMake, OpenCV, and vcpkg are not required on the installation
 machine.
+
+Linux release wheels are built on Ubuntu 24.04 with the `linux_x86_64` tag.
+The SupeRANSAC core is linked into the extension, but compatible system OpenCV
+runtime libraries are still required. On Ubuntu 24.04, installing
+`libopencv-core406t64` and `libopencv-calib3d406t64` provides those libraries.
+Portable manylinux wheels are not currently published.
 
 For a source build, clone this repository:
 
