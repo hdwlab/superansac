@@ -1,117 +1,281 @@
-name: Build Wheel
+name: Build and verify wheels
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+    tags: ["v*"]
   pull_request:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Release tag (e.g. v1.2.3)"
-        required: true
+
+permissions:
+  contents: read
+
+env:
+  VCPKG_COMMIT: cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3
+  VCPKG_DEFAULT_TRIPLET: x64-windows-static-md-release
 
 jobs:
-  build:
-    runs-on: windows-latest
- 
+  linux-regression:
+    name: Linux build and regression tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install system and Python build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libeigen3-dev libopencv-dev ninja-build
+          python -m pip install --upgrade pip
+          python -m pip install build==1.5.0 pytest==9.0.2
+
+      - name: Configure and run C++ tests
+        run: |
+          python tools/audit_source_licenses.py
+          cmake -S . -B build/cpp-tests -G Ninja \
+            -DSUPERANSAC_BUILD_SHARED_CORE=OFF \
+            -DSUPERANSAC_BUILD_TESTS=ON
+          cmake --build build/cpp-tests
+          ctest --test-dir build/cpp-tests --output-on-failure
+
+      - name: Build Linux wheel through PEP 517
+        run: |
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          python -m build --wheel --outdir dist
+
+      - name: Audit and test installed Linux wheel
+        run: |
+          python tools/audit_wheel.py dist/*.whl --platform linux
+          python -m pip install --force-reinstall dist/*.whl
+          python -m pytest tests/python/test_wheel_smoke.py -q
+
+  windows-wheels:
+    name: Windows CP${{ matrix.python-tag }} wheel
+    runs-on: windows-2022
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
-
+        include:
+          - python-version: "3.10"
+            python-tag: "310"
+          - python-version: "3.11"
+            python-tag: "311"
+          - python-version: "3.12"
+            python-tag: "312"
     env:
+      VCPKG_ROOT: ${{ github.workspace }}\.vcpkg
+      VCPKG_INSTALLED_DIR: ${{ github.workspace }}\vcpkg_installed
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg-cache
-      VCPKG_COMMIT: cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3
-
+      CMAKE_ARGS: >-
+        -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/.vcpkg/scripts/buildsystems/vcpkg.cmake
+        -DVCPKG_TARGET_TRIPLET=x64-windows-static-md-release
+        -DVCPKG_INSTALLED_DIR=${{ github.workspace }}/vcpkg_installed
+        -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/triplets
+        -DSUPERANSAC_BUILD_SHARED_CORE=OFF
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
 
-      - name: Setup Python
+      - name: Set up Python ${{ matrix.python-version }} x64
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: Install vcpkg
-        shell: pwsh
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git vcpkg
-          git -C vcpkg checkout $env:VCPKG_COMMIT
-          .\vcpkg\bootstrap-vcpkg.bat
-
-      - name: Create Release-only Triplet
-        shell: pwsh
-        run: |
-          $tripletDir = "${{ github.workspace }}\custom-triplets"
-
-          New-Item -ItemType Directory -Force -Path $tripletDir
-          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE
-
-          @"
-          set(VCPKG_TARGET_ARCHITECTURE x64)
-          set(VCPKG_CRT_LINKAGE dynamic)
-          set(VCPKG_LIBRARY_LINKAGE static)
-          set(VCPKG_BUILD_TYPE release)
-          "@ | Out-File `
-              "$tripletDir\x64-windows-release.cmake"
+          architecture: x64
 
       - name: Restore vcpkg binary cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: ${{ github.workspace }}\vcpkg-cache
-          key: vcpkg-${{ runner.os }}-x64-release-${{ env.VCPKG_COMMIT }}-v1
-          restore-keys: |
-            vcpkg-${{ runner.os }}-x64-release-${{ env.VCPKG_COMMIT }}-
-            vcpkg-${{ runner.os }}-x64-release-
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-${{ env.VCPKG_DEFAULT_TRIPLET }}-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json', 'triplets/**', 'packaging/opencv-build-info/**') }}
 
-      - name: Install C++ dependencies
+      - name: Install pinned vcpkg
         shell: pwsh
         run: |
-          .\vcpkg\vcpkg install `
-            eigen3:x64-windows-release `
-            opencv4[core,calib3d]:x64-windows-release `
-            --overlay-triplets="${{ github.workspace }}\custom-triplets"
+          git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
+          git -C $env:VCPKG_ROOT checkout --detach $env:VCPKG_COMMIT
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
 
-      - name: Install Python dependencies
+      - name: Install Python build and test tools
         run: |
           python -m pip install --upgrade pip
-          pip install wheel setuptools pybind11
+          python -m pip install build==1.5.0 twine==6.2.0 pytest==9.0.2
 
-      - name: Build wheel
+      - name: Record reproducible-build epoch
         shell: pwsh
-        env:
-          CMAKE_ARGS: >
-            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake
-            -DVCPKG_TARGET_TRIPLET=x64-windows-release
         run: |
-          python setup.py bdist_wheel
+          $epoch = git show -s --format=%ct HEAD
+          "SOURCE_DATE_EPOCH=$epoch" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Upload wheel
+      - name: Build wheel through PEP 517
+        run: python -m build --wheel --outdir dist
+
+      - name: Check wheel tag, metadata, contents, and licenses
+        shell: pwsh
+        run: |
+          $wheels = @(Get-ChildItem dist\*.whl)
+          if ($wheels.Count -ne 1) { throw "Expected one wheel, found $($wheels.Count)" }
+          if ($wheels[0].Name -notmatch "-cp${{ matrix.python-tag }}-cp${{ matrix.python-tag }}-win_amd64\.whl$") {
+            throw "Unexpected wheel tag: $($wheels[0].Name)"
+          }
+          python -m twine check $wheels[0].FullName
+          python tools\audit_wheel.py $wheels[0].FullName --platform windows
+          python tools\audit_vcpkg_licenses.py $env:VCPKG_INSTALLED_DIR --triplet $env:VCPKG_DEFAULT_TRIPLET
+
+      - name: Check PE dependencies
+        shell: pwsh
+        run: |
+          $wheel = (Get-ChildItem dist\*.whl).FullName
+          $extracted = Join-Path $env:RUNNER_TEMP "wheel-contents-${{ matrix.python-tag }}"
+          python -m zipfile -e $wheel $extracted
+          $extension = (Get-ChildItem $extracted -Filter "pysuperansac*.pyd" -Recurse).FullName
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $visualStudio = & $vswhere -latest -property installationPath
+          $dumpbin = (Get-ChildItem "$visualStudio\VC\Tools\MSVC" -Filter dumpbin.exe -Recurse | Sort-Object FullName | Select-Object -Last 1).FullName
+          $dependencyReport = Join-Path $env:RUNNER_TEMP "dumpbin-${{ matrix.python-tag }}.txt"
+          & $dumpbin /DEPENDENTS $extension | Out-File $dependencyReport -Encoding utf8
+          Get-Content $dependencyReport
+          python tools\check_windows_dependencies.py $dependencyReport
+
+      - name: Install in a clean environment and run public API tests
+        shell: pwsh
+        run: |
+          $testEnvironment = Join-Path $env:RUNNER_TEMP "wheel-test-${{ matrix.python-tag }}"
+          python -m venv $testEnvironment
+          $testPython = Join-Path $testEnvironment "Scripts\python.exe"
+          & $testPython -m pip install --upgrade pip
+          & $testPython -m pip install (Get-ChildItem dist\*.whl).FullName pytest==9.0.2
+          $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -notmatch '(?i)vcpkg|cmake|visual studio' }) -join ';'
+          & $testPython -m pytest tests\python\test_wheel_smoke.py -q
+          & $testPython -m pip uninstall --yes pysuperansac
+          & $testPython -c "import importlib.util; assert importlib.util.find_spec('pysuperansac') is None"
+
+      - name: Rebuild and verify byte-for-byte reproducibility
+        if: matrix.python-version == '3.12'
+        shell: pwsh
+        run: |
+          python -m build --wheel --outdir dist-repro
+          $first = (Get-FileHash (Get-ChildItem dist\*.whl).FullName -Algorithm SHA256).Hash
+          $second = (Get-FileHash (Get-ChildItem dist-repro\*.whl).FullName -Algorithm SHA256).Hash
+          "first:  $first"
+          "second: $second"
+          if ($first -ne $second) { throw "Wheel builds are not reproducible" }
+
+      - name: Upload verified wheel
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wheel-py${{ matrix.python-version }}
           path: dist/*.whl
+          if-no-files-found: error
+          retention-days: 14
+
+  performance:
+    name: GCRANSAC regression gate
+    needs: windows-wheels
+    runs-on: windows-2022
+    steps:
+      - name: Check out benchmark scripts
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Python 3.12 x64
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+          architecture: x64
+
+      - name: Download candidate wheel
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: wheel-py3.12
+          path: candidate-wheel
+
+      - name: Download the rc.2 baseline wheel
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path baseline-wheel | Out-Null
+          Invoke-WebRequest `
+            -Uri "https://github.com/hdwlab/superansac/releases/download/v1.0.0-rc.2/pysuperansac-1.0-cp312-cp312-win_amd64.whl" `
+            -OutFile "baseline-wheel\pysuperansac-1.0-cp312-cp312-win_amd64.whl"
+
+      - name: Benchmark baseline and candidate in isolated environments
+        shell: pwsh
+        run: |
+          python -m venv "$env:RUNNER_TEMP\baseline-env"
+          python -m venv "$env:RUNNER_TEMP\candidate-env"
+          $baselinePython = "$env:RUNNER_TEMP\baseline-env\Scripts\python.exe"
+          $candidatePython = "$env:RUNNER_TEMP\candidate-env\Scripts\python.exe"
+          & $baselinePython -m pip install --disable-pip-version-check numpy==1.26.4 (Get-ChildItem baseline-wheel\*.whl).FullName
+          & $candidatePython -m pip install --disable-pip-version-check numpy==1.26.4 (Get-ChildItem candidate-wheel\*.whl).FullName
+          & $baselinePython tools\benchmark_gcransac.py --output baseline.json
+          & $candidatePython tools\benchmark_gcransac.py --output candidate.json
+          python tools\compare_benchmarks.py baseline.json candidate.json --max-ratio 1.25
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gcransac-performance
+          path: "*.json"
+          if-no-files-found: warn
 
   release:
-    needs: build
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-
+    name: Publish tag artifacts
+    needs: [linux-regression, windows-wheels, performance]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
-
     steps:
-      - name: Download all wheels
+      - name: Verify release tag is on main
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Validate release ref
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$ ]]
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: Download all verified wheels
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: wheel-py*
           merge-multiple: true
           path: dist
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
-        with:
-          tag_name: ${{ inputs.version }}
-          files: dist/*.whl
+      - name: Create checksums and release notes
+        run: |
+          cd dist
+          sha256sum -- *.whl | sort -k2 > SHA256SUMS.txt
+          cat > RELEASE_NOTES.md <<'EOF'
+          Windows x64 wheels for CPython 3.10, 3.11, and 3.12.
+
+          - Core, OpenCV core/calib3d, and zlib are statically linked; Eigen is header-only.
+          - MSVC runtime is dynamically linked (`/MD`).
+          - Upstream base: `27de48676f07704856fb5619dd31cde807d0661d`
+          - vcpkg baseline: `cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3`
+          - Each wheel passed clean-environment import, GCRANSAC homography, DLL, license, path-leak, and metadata audits.
+
+          This is a prerelease. Published assets are immutable; fixes use a new tag.
+          EOF
+
+      - name: Create immutable prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/*.whl dist/SHA256SUMS.txt \
+            --prerelease \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file dist/RELEASE_NOTES.md
