@@ -289,7 +289,15 @@ jobs:
             LD_LIBRARY_PATH="$PWD/build/candidate/src" \
             python tools/benchmark_gcransac.py --output candidate-source-linux.json
 
-      - name: Verify Linux source benchmark result equivalence
+      - name: Verify Linux source quality against rc.2
+        run: >-
+          python tools/compare_benchmarks.py baseline-linux.json
+          candidate-source-linux.json --quality-only
+          --min-inlier-precision 0.99 --min-inlier-recall 0.8
+          --max-reprojection-rmse 0.8
+
+      - name: Report Linux source result drift from rc.2
+        continue-on-error: true
         run: >-
           python tools/compare_benchmarks.py baseline-linux.json
           candidate-source-linux.json --results-only
@@ -298,7 +306,7 @@ jobs:
         continue-on-error: true
         run: >-
           python tools/compare_benchmarks.py baseline-linux.json
-          candidate-source-linux.json --max-ratio 1.25
+          candidate-source-linux.json --performance-only --max-ratio 1.25
 
       - name: Benchmark the shipped CP312 wheel
         run: |
@@ -309,18 +317,32 @@ jobs:
           "$candidate_python" tools/benchmark_gcransac.py \
             --output candidate-wheel-linux.json
 
-      - name: Verify Linux wheel benchmark result equivalence
+      - name: Report Linux wheel result drift from candidate source
+        continue-on-error: true
         run: >-
-          python tools/compare_benchmarks.py baseline-linux.json
+          python tools/compare_benchmarks.py candidate-source-linux.json
           candidate-wheel-linux.json --results-only
           --relative-tolerance 1e-7 --absolute-tolerance 1e-7
+
+      - name: Verify Linux wheel quality matches candidate source
+        run: >-
+          python tools/compare_benchmarks.py candidate-source-linux.json
+          candidate-wheel-linux.json --quality-only
+          --min-inlier-precision 0.99 --min-inlier-recall 0.8
+          --max-reprojection-rmse 0.8
+
+      - name: Verify Linux wheel quality against rc.2
+        run: >-
+          python tools/compare_benchmarks.py baseline-linux.json
+          candidate-wheel-linux.json --quality-only
+          --min-inlier-precision 0.99 --min-inlier-recall 0.8
+          --max-reprojection-rmse 0.8
 
       - name: Report Linux wheel performance budget
         continue-on-error: true
         run: >-
           python tools/compare_benchmarks.py baseline-linux.json
-          candidate-wheel-linux.json --max-ratio 1.25
-          --relative-tolerance 1e-7 --absolute-tolerance 1e-7
+          candidate-wheel-linux.json --performance-only --max-ratio 1.25
 
       - name: Upload Linux benchmark evidence
         if: always()
@@ -370,7 +392,15 @@ jobs:
           & $baselinePython tools\benchmark_gcransac.py --output baseline.json
           & $candidatePython tools\benchmark_gcransac.py --output candidate.json
 
-      - name: Verify Windows benchmark result equivalence
+      - name: Verify Windows benchmark quality against rc.2
+        shell: pwsh
+        run: >-
+          python tools\compare_benchmarks.py baseline.json candidate.json
+          --quality-only --min-inlier-precision 0.99 --min-inlier-recall 0.8
+          --max-reprojection-rmse 0.8
+
+      - name: Report Windows result drift from rc.2
+        continue-on-error: true
         shell: pwsh
         run: >-
           python tools\compare_benchmarks.py baseline.json candidate.json
@@ -381,9 +411,7 @@ jobs:
         shell: pwsh
         run: |
           python tools\compare_benchmarks.py baseline.json candidate.json `
-            --max-ratio 1.25 `
-            --relative-tolerance 1e-7 `
-            --absolute-tolerance 1e-7
+            --performance-only --max-ratio 1.25
 
       - name: Upload benchmark evidence
         if: always()

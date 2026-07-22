@@ -49,6 +49,34 @@ def gcransac_settings() -> pysuperansac.RANSACSettings:
     return settings
 
 
+def adversarial_gcransac_case() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return a case where pool-local indices cannot alias the intended inliers."""
+    point_count = 1000
+    inlier_count = 300
+    rng = np.random.default_rng(1)
+    source = rng.uniform([50.0, 50.0], [1820.0, 1000.0], (point_count, 2))
+    expected = np.array(
+        [[1.005, 0.008, 18.0], [-0.006, 0.997, 24.0], [4e-6, -7e-6, 1.0]],
+        dtype=np.float64,
+    )
+    homogeneous = np.column_stack((source, np.ones(point_count))) @ expected.T
+    ideal = homogeneous[:, :2] / homogeneous[:, 2:]
+    destination = ideal + rng.normal(0.0, 0.8, ideal.shape)
+    destination[inlier_count:] = rng.uniform(
+        [0.0, 0.0], [1920.0, 1080.0], (point_count - inlier_count, 2)
+    )
+
+    # Put every outlier before every inlier. A pool-local index accidentally
+    # used as a data-row index therefore selects only outliers.
+    permutation = np.concatenate((np.arange(inlier_count, point_count), np.arange(inlier_count)))
+    correspondences = np.ascontiguousarray(
+        np.column_stack((source, destination))[permutation], dtype=np.float64
+    )
+    known_inliers = np.arange(point_count - inlier_count, point_count)
+    image_sizes = np.array([1920.0, 1080.0, 1920.0, 1080.0], dtype=np.float64)
+    return correspondences, image_sizes, known_inliers, expected
+
+
 def test_public_api_is_available() -> None:
     for name in (
         "estimateHomography",
@@ -86,6 +114,37 @@ def test_gcransac_homography_estimation() -> None:
     error = np.linalg.norm(projected - correspondences[known_inliers, 2:4], axis=1)
     assert np.median(error) < 0.5
     assert np.percentile(error, 95) < 1.0
+
+
+def test_gcransac_local_optimization_uses_selected_inliers() -> None:
+    correspondences, image_sizes, known_inliers, expected = adversarial_gcransac_case()
+    settings = gcransac_settings()
+    settings.min_iterations = 300
+    settings.max_iterations = 300
+    settings.local_opt_k = 3
+    settings.final_optimization = pysuperansac.LocalOptimizationType.Nothing
+    settings.homography_bundle_refinement = False
+
+    homography, inlier_indices, _, _ = pysuperansac.estimateHomography(
+        correspondences,
+        image_sizes,
+        None,
+        settings,
+    )
+
+    selected = np.zeros(correspondences.shape[0], dtype=bool)
+    selected[np.asarray(inlier_indices, dtype=np.int64)] = True
+    assert selected[known_inliers].mean() >= 0.8
+
+    homography = np.asarray(homography, dtype=np.float64)
+    homography /= homography[2, 2]
+    source = np.column_stack((correspondences[known_inliers, :2], np.ones(known_inliers.size)))
+    projected = source @ homography.T
+    projected = projected[:, :2] / projected[:, 2:]
+    expected_projection = source @ expected.T
+    expected_projection = expected_projection[:, :2] / expected_projection[:, 2:]
+    rmse = np.sqrt(np.mean(np.sum((projected - expected_projection) ** 2, axis=1)))
+    assert rmse < 0.8
 
 
 @pytest.mark.parametrize(

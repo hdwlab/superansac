@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -21,7 +22,7 @@ if os.name != "nt":
     import resource
 
 
-def make_case(point_count: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
+def make_case(point_count: int, seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     rng = np.random.default_rng(seed)
     source = rng.uniform([50.0, 50.0], [1820.0, 1000.0], (point_count, 2))
     matrix = np.array(
@@ -30,12 +31,46 @@ def make_case(point_count: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
     )
     homogeneous = np.column_stack((source, np.ones(point_count))) @ matrix.T
     destination = homogeneous[:, :2] / homogeneous[:, 2:]
+    expected_destination = destination.copy()
     destination += rng.normal(0.0, 0.2, destination.shape)
     outliers = rng.choice(point_count, point_count // 4, replace=False)
     destination[outliers] = rng.uniform([0.0, 0.0], [1920.0, 1080.0], (len(outliers), 2))
+    known_inliers = np.ones(point_count, dtype=bool)
+    known_inliers[outliers] = False
     return (
         np.ascontiguousarray(np.column_stack((source, destination)), dtype=np.float64),
         np.array([1920.0, 1080.0, 1920.0, 1080.0], dtype=np.float64),
+        expected_destination,
+        known_inliers,
+    )
+
+
+def make_adversarial_case() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    point_count = 1000
+    inlier_count = 300
+    rng = np.random.default_rng(1)
+    source = rng.uniform([50.0, 50.0], [1820.0, 1000.0], (point_count, 2))
+    matrix = np.array(
+        [[1.005, 0.008, 18.0], [-0.006, 0.997, 24.0], [4e-6, -7e-6, 1.0]],
+        dtype=np.float64,
+    )
+    homogeneous = np.column_stack((source, np.ones(point_count))) @ matrix.T
+    expected_destination = homogeneous[:, :2] / homogeneous[:, 2:]
+    destination = expected_destination + rng.normal(0.0, 0.8, expected_destination.shape)
+    destination[inlier_count:] = rng.uniform(
+        [0.0, 0.0], [1920.0, 1080.0], (point_count - inlier_count, 2)
+    )
+
+    # A pool-local index accidentally used as a data-row index now points only
+    # at outliers, making the local-optimization sampling bug observable.
+    permutation = np.concatenate((np.arange(inlier_count, point_count), np.arange(inlier_count)))
+    known_inliers = np.zeros(point_count, dtype=bool)
+    known_inliers[point_count - inlier_count :] = True
+    return (
+        np.ascontiguousarray(np.column_stack((source, destination))[permutation], dtype=np.float64),
+        np.array([1920.0, 1080.0, 1920.0, 1080.0], dtype=np.float64),
+        expected_destination[permutation],
+        known_inliers,
     )
 
 
@@ -52,6 +87,16 @@ def settings() -> pysuperansac.RANSACSettings:
     result.final_optimization = pysuperansac.LocalOptimizationType.LSQ
     result.local_opt_k = 1
     result.use_sprt = False
+    return result
+
+
+def adversarial_settings() -> pysuperansac.RANSACSettings:
+    result = settings()
+    result.min_iterations = 300
+    result.max_iterations = 300
+    result.local_opt_k = 3
+    result.final_optimization = pysuperansac.LocalOptimizationType.Nothing
+    result.homography_bundle_refinement = False
     return result
 
 
@@ -96,26 +141,68 @@ def peak_rss_bytes() -> int:
 
 
 def measured_call(
-    correspondences: np.ndarray, image_sizes: np.ndarray
+    correspondences: np.ndarray,
+    image_sizes: np.ndarray,
+    settings_factory: Callable[[], pysuperansac.RANSACSettings],
 ) -> tuple[float, int, tuple[object, object, object, object]]:
     started = time.perf_counter()
-    result = pysuperansac.estimateHomography(correspondences, image_sizes, None, settings())
+    result = pysuperansac.estimateHomography(correspondences, image_sizes, None, settings_factory())
     elapsed = time.perf_counter() - started
     if not np.isfinite(np.asarray(result[0])).all():
         raise RuntimeError("benchmark produced a non-finite homography")
     return elapsed, peak_rss_bytes(), result
 
 
-def result_payload(result: tuple[object, object, object, object]) -> dict[str, object]:
+def normalized_model(result: tuple[object, object, object, object]) -> np.ndarray:
     model = np.asarray(result[0], dtype=np.float64)
     scale = model[-1, -1]
     if abs(scale) > np.finfo(np.float64).eps:
         model = model / scale
+    return model
+
+
+def result_payload(result: tuple[object, object, object, object]) -> dict[str, object]:
+    model = normalized_model(result)
     return {
         "model": model.tolist(),
         "inliers": np.asarray(result[1], dtype=np.int64).tolist(),
         "score": float(result[2]),
         "iterations": int(result[3]),
+    }
+
+
+def quality_payload(
+    result: tuple[object, object, object, object],
+    correspondences: np.ndarray,
+    expected_destination: np.ndarray,
+    known_inliers: np.ndarray,
+) -> dict[str, float]:
+    selected = np.zeros(correspondences.shape[0], dtype=bool)
+    selected[np.asarray(result[1], dtype=np.int64)] = True
+    true_positives = np.count_nonzero(selected & known_inliers)
+    selected_count = np.count_nonzero(selected)
+    known_inlier_count = np.count_nonzero(known_inliers)
+
+    source = np.column_stack(
+        (
+            correspondences[known_inliers, :2],
+            np.ones(known_inlier_count, dtype=np.float64),
+        )
+    )
+    projected = source @ normalized_model(result).T
+    projected = projected[:, :2] / projected[:, 2:]
+    reprojection_rmse = np.sqrt(
+        np.mean(
+            np.sum(
+                (projected - expected_destination[known_inliers]) ** 2,
+                axis=1,
+            )
+        )
+    )
+    return {
+        "inlier_precision": float(true_positives / selected_count) if selected_count else 0.0,
+        "inlier_recall": float(true_positives / known_inlier_count),
+        "reprojection_rmse": float(reprojection_rmse),
     }
 
 
@@ -126,6 +213,7 @@ def main() -> int:
     parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--repetitions", type=int, default=10)
     parser.add_argument("--in-process", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--adversarial-only", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     point_counts = [int(value) for value in args.sizes.split(",")]
@@ -134,21 +222,24 @@ def main() -> int:
         module = ""
         with tempfile.TemporaryDirectory(prefix="gcransac-benchmark-") as directory:
             temporary_root = Path(directory)
-            for point_count in point_counts:
-                case_output = temporary_root / f"{point_count}.json"
+            child_cases = [
+                (str(point_count), ["--sizes", str(point_count)]) for point_count in point_counts
+            ]
+            child_cases.append(("adversarial-1000", ["--adversarial-only"]))
+            for case_name, case_arguments in child_cases:
+                case_output = temporary_root / f"{case_name}.json"
                 subprocess.run(
                     [
                         sys.executable,
                         str(Path(__file__).resolve()),
                         "--output",
                         str(case_output),
-                        "--sizes",
-                        str(point_count),
                         "--warmups",
                         str(args.warmups),
                         "--repetitions",
                         str(args.repetitions),
                         "--in-process",
+                        *case_arguments,
                     ],
                     check=True,
                 )
@@ -160,19 +251,44 @@ def main() -> int:
         print_summary(payload)
         return 0
 
-    cases: dict[str, dict[str, float | int]] = {}
-    for point_count in point_counts:
-        correspondences, image_sizes = make_case(point_count, seed=0xB00 + point_count)
-        for _ in range(args.warmups):
-            pysuperansac.estimateHomography(correspondences, image_sizes, None, settings())
-        measurements = [
-            measured_call(correspondences, image_sizes) for _ in range(args.repetitions)
+    cases: dict[str, dict[str, object]] = {}
+    if args.adversarial_only:
+        benchmark_cases = [("adversarial-1000", *make_adversarial_case(), adversarial_settings)]
+    else:
+        benchmark_cases = [
+            (
+                str(point_count),
+                *make_case(point_count, seed=0xB00 + point_count),
+                settings,
+            )
+            for point_count in point_counts
         ]
-        cases[str(point_count)] = {
+
+    for (
+        case_name,
+        correspondences,
+        image_sizes,
+        expected_destination,
+        known_inliers,
+        settings_factory,
+    ) in benchmark_cases:
+        for _ in range(args.warmups):
+            pysuperansac.estimateHomography(correspondences, image_sizes, None, settings_factory())
+        measurements = [
+            measured_call(correspondences, image_sizes, settings_factory)
+            for _ in range(args.repetitions)
+        ]
+        cases[case_name] = {
             "median_seconds": statistics.median(value[0] for value in measurements),
             "peak_rss_bytes": max(value[1] for value in measurements),
             "repetitions": args.repetitions,
             "result": result_payload(measurements[0][2]),
+            "quality": quality_payload(
+                measurements[0][2],
+                correspondences,
+                expected_destination,
+                known_inliers,
+            ),
         }
 
     payload = {
@@ -198,6 +314,7 @@ def print_summary(payload: dict[str, object]) -> None:
                 "inlier_count": len(values["result"]["inliers"]),
                 "score": values["result"]["score"],
                 "iterations": values["result"]["iterations"],
+                "quality": values["quality"],
             }
             for case, values in cases.items()
         },
