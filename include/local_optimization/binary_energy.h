@@ -340,8 +340,12 @@ private:
         bfs_queue_.clear();
         levels_[source] = 0;
         bfs_queue_.push_back(source);
+        int sink_level = -1;
         for (std::size_t head = 0; head < bfs_queue_.size(); ++head) {
             const std::size_t current = bfs_queue_[head];
+            if (sink_level >= 0 && levels_[current] >= sink_level) {
+                break;
+            }
             for (FlowIndex edge_index = flow_offsets_[current];
                  edge_index < flow_offsets_[current + 1]; ++edge_index) {
                 const FlowEdge& edge = flow_edges_[edge_index];
@@ -350,7 +354,7 @@ private:
                 }
                 levels_[edge.target] = levels_[current] + 1;
                 if (edge.target == sink) {
-                    return true;
+                    sink_level = levels_[edge.target];
                 }
                 bfs_queue_.push_back(edge.target);
             }
