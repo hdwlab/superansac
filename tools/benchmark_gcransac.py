@@ -21,7 +21,7 @@ if os.name != "nt":
     import resource
 
 
-def make_case(point_count: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
+def make_case(point_count: int, seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     rng = np.random.default_rng(seed)
     source = rng.uniform([50.0, 50.0], [1820.0, 1000.0], (point_count, 2))
     matrix = np.array(
@@ -30,12 +30,17 @@ def make_case(point_count: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
     )
     homogeneous = np.column_stack((source, np.ones(point_count))) @ matrix.T
     destination = homogeneous[:, :2] / homogeneous[:, 2:]
+    expected_destination = destination.copy()
     destination += rng.normal(0.0, 0.2, destination.shape)
     outliers = rng.choice(point_count, point_count // 4, replace=False)
     destination[outliers] = rng.uniform([0.0, 0.0], [1920.0, 1080.0], (len(outliers), 2))
+    known_inliers = np.ones(point_count, dtype=bool)
+    known_inliers[outliers] = False
     return (
         np.ascontiguousarray(np.column_stack((source, destination)), dtype=np.float64),
         np.array([1920.0, 1080.0, 1920.0, 1080.0], dtype=np.float64),
+        expected_destination,
+        known_inliers,
     )
 
 
@@ -106,16 +111,56 @@ def measured_call(
     return elapsed, peak_rss_bytes(), result
 
 
-def result_payload(result: tuple[object, object, object, object]) -> dict[str, object]:
+def normalized_model(result: tuple[object, object, object, object]) -> np.ndarray:
     model = np.asarray(result[0], dtype=np.float64)
     scale = model[-1, -1]
     if abs(scale) > np.finfo(np.float64).eps:
         model = model / scale
+    return model
+
+
+def result_payload(result: tuple[object, object, object, object]) -> dict[str, object]:
+    model = normalized_model(result)
     return {
         "model": model.tolist(),
         "inliers": np.asarray(result[1], dtype=np.int64).tolist(),
         "score": float(result[2]),
         "iterations": int(result[3]),
+    }
+
+
+def quality_payload(
+    result: tuple[object, object, object, object],
+    correspondences: np.ndarray,
+    expected_destination: np.ndarray,
+    known_inliers: np.ndarray,
+) -> dict[str, float]:
+    selected = np.zeros(correspondences.shape[0], dtype=bool)
+    selected[np.asarray(result[1], dtype=np.int64)] = True
+    true_positives = np.count_nonzero(selected & known_inliers)
+    selected_count = np.count_nonzero(selected)
+    known_inlier_count = np.count_nonzero(known_inliers)
+
+    source = np.column_stack(
+        (
+            correspondences[known_inliers, :2],
+            np.ones(known_inlier_count, dtype=np.float64),
+        )
+    )
+    projected = source @ normalized_model(result).T
+    projected = projected[:, :2] / projected[:, 2:]
+    reprojection_rmse = np.sqrt(
+        np.mean(
+            np.sum(
+                (projected - expected_destination[known_inliers]) ** 2,
+                axis=1,
+            )
+        )
+    )
+    return {
+        "inlier_precision": float(true_positives / selected_count) if selected_count else 0.0,
+        "inlier_recall": float(true_positives / known_inlier_count),
+        "reprojection_rmse": float(reprojection_rmse),
     }
 
 
@@ -160,9 +205,11 @@ def main() -> int:
         print_summary(payload)
         return 0
 
-    cases: dict[str, dict[str, float | int]] = {}
+    cases: dict[str, dict[str, object]] = {}
     for point_count in point_counts:
-        correspondences, image_sizes = make_case(point_count, seed=0xB00 + point_count)
+        correspondences, image_sizes, expected_destination, known_inliers = make_case(
+            point_count, seed=0xB00 + point_count
+        )
         for _ in range(args.warmups):
             pysuperansac.estimateHomography(correspondences, image_sizes, None, settings())
         measurements = [
@@ -173,6 +220,12 @@ def main() -> int:
             "peak_rss_bytes": max(value[1] for value in measurements),
             "repetitions": args.repetitions,
             "result": result_payload(measurements[0][2]),
+            "quality": quality_payload(
+                measurements[0][2],
+                correspondences,
+                expected_destination,
+                known_inliers,
+            ),
         }
 
     payload = {
@@ -198,6 +251,7 @@ def print_summary(payload: dict[str, object]) -> None:
                 "inlier_count": len(values["result"]["inliers"]),
                 "score": values["result"]["score"],
                 "iterations": values["result"]["iterations"],
+                "quality": values["quality"],
             }
             for case, values in cases.items()
         },
