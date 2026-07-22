@@ -8,7 +8,9 @@ import ctypes
 import json
 import os
 import statistics
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -120,13 +122,46 @@ def result_payload(result: tuple[object, object, object, object]) -> dict[str, o
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--sizes", default="1000,5000")
+    parser.add_argument("--sizes", default="1000,5000,20000")
     parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--repetitions", type=int, default=10)
+    parser.add_argument("--in-process", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
+    point_counts = [int(value) for value in args.sizes.split(",")]
+    if not args.in_process:
+        cases: dict[str, dict[str, object]] = {}
+        module = ""
+        with tempfile.TemporaryDirectory(prefix="gcransac-benchmark-") as directory:
+            temporary_root = Path(directory)
+            for point_count in point_counts:
+                case_output = temporary_root / f"{point_count}.json"
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(Path(__file__).resolve()),
+                        "--output",
+                        str(case_output),
+                        "--sizes",
+                        str(point_count),
+                        "--warmups",
+                        str(args.warmups),
+                        "--repetitions",
+                        str(args.repetitions),
+                        "--in-process",
+                    ],
+                    check=True,
+                )
+                case_payload = json.loads(case_output.read_text(encoding="utf-8"))
+                module = str(case_payload["module"])
+                cases.update(case_payload["cases"])
+        payload = {"module": module, "cases": cases}
+        args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        print_summary(payload)
+        return 0
+
     cases: dict[str, dict[str, float | int]] = {}
-    for point_count in (int(value) for value in args.sizes.split(",")):
+    for point_count in point_counts:
         correspondences, image_sizes = make_case(point_count, seed=0xB00 + point_count)
         for _ in range(args.warmups):
             pysuperansac.estimateHomography(correspondences, image_sizes, None, settings())
@@ -145,6 +180,14 @@ def main() -> int:
         "cases": cases,
     }
     args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    print_summary(payload)
+    return 0
+
+
+def print_summary(payload: dict[str, object]) -> None:
+    cases = payload["cases"]
+    if not isinstance(cases, dict):
+        raise TypeError("benchmark cases must be a mapping")
     summary = {
         "module": payload["module"],
         "cases": {
@@ -160,7 +203,6 @@ def main() -> int:
         },
     }
     print(json.dumps(summary, indent=2))
-    return 0
 
 
 if __name__ == "__main__":
