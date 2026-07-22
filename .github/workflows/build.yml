@@ -202,7 +202,11 @@ jobs:
           )
           if ('${{ matrix.compiler }}' -eq 'clang-cl') {
             Get-Command clang-cl.exe -ErrorAction Stop
-            $cmakeArguments += '-DCMAKE_CXX_COMPILER=clang-cl'
+            # scikit-build-core selects the Visual Studio generator on Windows;
+            # choose its LLVM toolset explicitly instead of setting a compiler
+            # path that the multi-config generator ignores.
+            $cmakeArguments += '-T'
+            $cmakeArguments += 'ClangCL'
           }
           "CMAKE_ARGS=$($cmakeArguments -join ' ')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -364,9 +368,7 @@ jobs:
           & $candidatePython -m pip install --disable-pip-version-check numpy==1.26.4 (Get-ChildItem candidate-wheel\*.whl).FullName
           & $baselinePython tools\benchmark_gcransac.py --output baseline.json
           & $candidatePython tools\benchmark_gcransac.py --output candidate.json
-          # The baseline uses MSVC while the portable replacement uses clang-cl;
-          # retain a strict Linux gate and allow the measured Windows toolchain gap.
-          python tools\compare_benchmarks.py baseline.json candidate.json --max-ratio 1.75
+          python tools\compare_benchmarks.py baseline.json candidate.json --max-ratio 1.25
 
       - name: Upload benchmark evidence
         if: always()
