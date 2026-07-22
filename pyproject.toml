@@ -1,0 +1,78 @@
+[build-system]
+requires = [
+  "scikit-build-core==1.0.3",
+  "setuptools-scm==10.2.1",
+  "pybind11==3.0.4",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "pysuperansac"
+dynamic = ["version"]
+description = "Python bindings for SupeRANSAC robust model estimation"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = ["numpy>=1.23,<3"]
+license = "MIT AND BSD-2-Clause AND BSD-3-Clause AND MPL-2.0 AND Apache-2.0 AND Zlib"
+license-files = [
+  "LICENSE",
+  "THIRD_PARTY_NOTICES.md",
+  "THIRD_PARTY_LICENSES/*",
+]
+authors = [
+  { name = "Daniel Barath", email = "majti89@gmail.com" },
+]
+maintainers = [
+  { name = "Human Dataware Lab" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "Operating System :: Microsoft :: Windows :: Windows 10",
+  "Operating System :: Microsoft :: Windows :: Windows 11",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: C++",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+[project.urls]
+Homepage = "https://github.com/hdwlab/superansac"
+Repository = "https://github.com/hdwlab/superansac"
+Issues = "https://github.com/hdwlab/superansac/issues"
+Paper = "https://arxiv.org/abs/2506.04803"
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+strict-config = true
+wheel.packages = []
+wheel.reproducible = true
+sdist.reproducible = true
+cmake.build-type = "Release"
+install.components = ["python"]
+
+[[tool.dynamic-metadata]]
+provider = "scikit_build_core.metadata.setuptools_scm"
+
+[tool.setuptools_scm]
+version_scheme = "no-guess-dev"
+local_scheme = "node-and-date"
+
+[tool.cibuildwheel]
+build = [
+  "cp310-manylinux_x86_64",
+  "cp311-manylinux_x86_64",
+  "cp312-manylinux_x86_64",
+]
+build-frontend = "build"
+test-requires = ["pytest==9.0.2"]
+test-command = "python -m pytest {project}/tests/python/test_wheel_smoke.py -q"
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_28"
+before-all = "bash {package}/tools/build_manylinux_dependencies.sh"
+environment = { CMAKE_ARGS = "-DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-linux-static-release -DVCPKG_INSTALLED_DIR=/opt/vcpkg_installed -DVCPKG_MANIFEST_MODE=OFF -DSUPERANSAC_BUILD_SHARED_CORE=OFF -DSUPERANSAC_ENABLE_NATIVE_ARCH=OFF" }
+repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
