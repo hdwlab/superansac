@@ -305,9 +305,9 @@ private:
         insertion_offsets_.assign(flow_offsets_.begin(), flow_offsets_.end() - 1);
         levels_.resize(vertex_count);
         next_edges_.resize(vertex_count);
-        path_vertices_.reserve(vertex_count);
-        path_edges_.reserve(vertex_count);
-        path_capacities_.reserve(vertex_count);
+        path_vertices_.resize(vertex_count);
+        path_edges_.resize(vertex_count);
+        path_capacities_.resize(vertex_count);
         bfs_queue_.reserve(vertex_count);
     }
 
@@ -351,18 +351,16 @@ private:
 
     Capacity send_flow(const std::size_t source,
                        const std::size_t sink) {
-        path_vertices_.clear();
-        path_edges_.clear();
-        path_capacities_.clear();
-        path_vertices_.push_back(source);
-        path_capacities_.push_back(std::numeric_limits<Capacity>::max());
+        std::size_t depth = 0;
+        path_vertices_[0] = source;
+        path_capacities_[0] = std::numeric_limits<Capacity>::max();
 
-        while (!path_vertices_.empty()) {
-            const std::size_t current = path_vertices_.back();
+        while (true) {
+            const std::size_t current = path_vertices_[depth];
             if (current == sink) {
-                const Capacity sent = path_capacities_.back();
-                for (std::size_t depth = 0; depth < path_edges_.size(); ++depth) {
-                    FlowEdge& edge = flow_edges_[path_edges_[depth]];
+                const Capacity sent = path_capacities_[depth];
+                for (std::size_t path_index = 0; path_index < depth; ++path_index) {
+                    FlowEdge& edge = flow_edges_[path_edges_[path_index]];
                     edge.residual -= sent;
                     flow_edges_[edge.reverse].residual += sent;
                 }
@@ -380,25 +378,22 @@ private:
             }
             if (edge_index < flow_offsets_[current + 1]) {
                 const FlowEdge& edge = flow_edges_[edge_index];
-                path_edges_.push_back(edge_index);
-                path_vertices_.push_back(edge.target);
-                path_capacities_.push_back(
-                    std::min(path_capacities_.back(), edge.residual));
+                path_edges_[depth] = edge_index;
+                path_vertices_[depth + 1] = edge.target;
+                path_capacities_[depth + 1] =
+                    std::min(path_capacities_[depth], edge.residual);
+                ++depth;
                 continue;
             }
 
             // This vertex cannot reach the sink in the current level graph.
             levels_[current] = -1;
-            path_vertices_.pop_back();
-            path_capacities_.pop_back();
-            if (!path_edges_.empty()) {
-                path_edges_.pop_back();
-                if (!path_vertices_.empty()) {
-                    ++next_edges_[path_vertices_.back()];
-                }
+            if (depth == 0) {
+                return Capacity{0};
             }
+            --depth;
+            ++next_edges_[path_vertices_[depth]];
         }
-        return Capacity{0};
     }
 
     Capacity maximum_flow(const std::size_t source,
