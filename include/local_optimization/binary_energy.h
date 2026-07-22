@@ -36,8 +36,9 @@
 namespace superansac::local_optimization {
 
 // Minimizes binary energies consisting of unary and submodular pairwise terms
-// with an iterative Dinic maximum-flow implementation. Label 0 is the source
-// segment and label 1 is the sink segment.
+// with a Dinic maximum-flow implementation. Shallow level graphs accumulate a
+// blocking flow recursively; unusually deep graphs use an iterative fallback.
+// Label 0 is the source segment and label 1 is the sink segment.
 template <typename Capacity>
 class BinaryEnergy {
     static_assert(std::is_floating_point_v<Capacity>,
