@@ -34,13 +34,17 @@
 # Build files
 build/*
 dist/*
+.vcpkg/
+vcpkg-cache/
+vcpkg_installed/
+dist-repro/
+.venv*/
 
 # Other
 *.pyc
 *.zip
 pysuperansac.egg-info/*
 .vscode/
-pyproject.toml
 *.egg
 *.csv
 *.pdf

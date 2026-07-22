@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.12)
-project(SupeRANSAC)
+cmake_minimum_required(VERSION 3.21)
+project(SupeRANSAC LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,7 +9,18 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# ---- Optional fast-math (OFF by default) ----
+# ---- Build shape ----
+if(WIN32)
+  set(SUPERANSAC_SHARED_CORE_DEFAULT OFF)
+else()
+  set(SUPERANSAC_SHARED_CORE_DEFAULT ON)
+endif()
+option(SUPERANSAC_BUILD_SHARED_CORE
+  "Build the C++ core as a shared library"
+  ${SUPERANSAC_SHARED_CORE_DEFAULT})
+option(SUPERANSAC_BUILD_TESTS "Build SupeRANSAC tests" OFF)
+
+# ---- Optional fast-math (ON for backward compatibility) ----
 option(SUPERANSAC_ENABLE_FAST_MATH "Enable aggressive fast-math" ON)
 
 # ---- Flag probes ----
@@ -65,7 +76,18 @@ elseif(MSVC)
     $<$<CONFIG:Release>:/Zc:inline>
     $<$<CONFIG:Release>:/W0>
   )
-  add_link_options($<$<CONFIG:Release>:/LTCG>)
+  file(TO_NATIVE_PATH "${PROJECT_SOURCE_DIR}" SUPERANSAC_SOURCE_PATH_NATIVE)
+  file(TO_NATIVE_PATH "${PROJECT_BINARY_DIR}" SUPERANSAC_BUILD_PATH_NATIVE)
+  add_compile_options(
+    "/pathmap:${SUPERANSAC_SOURCE_PATH_NATIVE}=."
+    "/pathmap:${SUPERANSAC_BUILD_PATH_NATIVE}=.build"
+  )
+  add_link_options(
+    $<$<CONFIG:Release>:/LTCG>
+    $<$<CONFIG:Release>:/Brepro>
+  )
+  set(CMAKE_MSVC_RUNTIME_LIBRARY
+    "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 endif()
 
 # ---- Optional fast-math flags ----
@@ -94,3 +116,8 @@ set(PYBIND11_FINDPYTHON ON)
 
 add_subdirectory(src)
 add_subdirectory(python)
+
+if(SUPERANSAC_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests/cpp)
+endif()
