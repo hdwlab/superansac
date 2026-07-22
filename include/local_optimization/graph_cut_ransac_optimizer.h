@@ -39,7 +39,7 @@
 #include "../samplers/uniform_random_sampler.h"
 #include "../neighborhood/abstract_neighborhood.h"
 #include "../utils/types.h"
-#include "GCoptimization.h"
+#include "binary_energy.h"
 
 namespace superansac
 {
@@ -142,15 +142,11 @@ namespace superansac
 				// The inlier-outlier threshold
 				const double &kThreshold = kScoring_->getThreshold();
 
-				// The graph used by the graph-cut labeling. Allocated once and
-				// reset() in every labeling call, so the node/arc arrays are reused
-				// across the (up to) graphCutNumber labelings instead of being
-				// malloc'd/freed each time. reset() restores a freshly-constructed
-				// state, so the resulting labelings are identical.
-				Energy<double, double, double> problemGraph(
-					static_cast<int>(kData_.rows()), // The number of vertices
-					static_cast<int>(kNeighborNumber), // The number of edges
-					NULL);
+				// The binary energy used by graph-cut labeling. Its term storage is
+				// reserved once and reset for each of the graphCutNumber labelings.
+				BinaryEnergy<double> problemGraph(
+					static_cast<size_t>(kData_.rows()), // The number of vertices
+					kNeighborNumber); // The number of edges
 
 				// The inner RANSAC loop
 				for (size_t iteration = 0; iteration < graphCutNumber; ++iteration)
@@ -269,13 +265,13 @@ namespace superansac
 				const estimator::Estimator *kEstimator_, // The estimator used for the model estimation
 				const double kLambda_, // The weight for the spatial coherence term
 				const double kThreshold_, // The kThreshold_ for the inlier-outlier decision
-				Energy<double, double, double> *problemGraph, // The (reused) problem graph
+				BinaryEnergy<double> *problemGraph, // The (reused) problem graph
 				std::vector<size_t> &inliers_) const // The resulting inlier set
 			{
 				// The number of points in the data set
 				const int &pointNumber = kData_.rows();
 
-				// Restore the freshly-constructed graph state (reuses the node/arc arrays)
+				// Clear the previous energy while retaining reserved term storage.
 				problemGraph->reset();
 
 				// Add a vertex for each point
@@ -364,7 +360,7 @@ namespace superansac
 				// Select the inliers, i.e., the points labeled as SINK.
 				inliers_.reserve(pointNumber);
 				for (auto pointIdx = 0; pointIdx < pointNumber; ++pointIdx)
-					if (problemGraph->what_segment(pointIdx) == Graph<double, double, double>::SINK)
+					if (problemGraph->what_segment(pointIdx) == BinaryEnergy<double>::Segment::Sink)
 						inliers_.emplace_back(pointIdx);
 			}
 		};
