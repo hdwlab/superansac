@@ -19,6 +19,9 @@ option(SUPERANSAC_BUILD_SHARED_CORE
   "Build the C++ core as a shared library"
   ${SUPERANSAC_SHARED_CORE_DEFAULT})
 option(SUPERANSAC_BUILD_TESTS "Build SupeRANSAC tests" OFF)
+option(SUPERANSAC_ENABLE_NATIVE_ARCH
+  "Tune generated code for the build host (unsafe for distributable wheels)"
+  OFF)
 
 # ---- Optional fast-math (ON for backward compatibility) ----
 option(SUPERANSAC_ENABLE_FAST_MATH "Enable aggressive fast-math" ON)
@@ -38,8 +41,10 @@ endfunction()
 # ---- Baseline high-performance flags ----
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   add_flag_if_supported(-O3)
-  add_flag_if_supported(-march=native)
-  add_flag_if_supported(-mtune=native)
+  if(SUPERANSAC_ENABLE_NATIVE_ARCH)
+    add_flag_if_supported(-march=native)
+    add_flag_if_supported(-mtune=native)
+  endif()
   add_flag_if_supported(-fno-plt)
   add_flag_if_supported(-funroll-loops)
   add_flag_if_supported(-ftree-vectorize)
@@ -68,8 +73,10 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     )
   else()
     add_flag_if_supported(-O3)
-    add_flag_if_supported(-march=native)
-    add_flag_if_supported(-mtune=native)
+    if(SUPERANSAC_ENABLE_NATIVE_ARCH)
+      add_flag_if_supported(-march=native)
+      add_flag_if_supported(-mtune=native)
+    endif()
     check_cxx_compiler_flag("-flto=thin" HAS_FLTO_THIN)
     if(HAS_FLTO_THIN)
       add_compile_options($<$<CONFIG:Release>:-flto=thin>)
@@ -136,6 +143,22 @@ check_ipo_supported(RESULT ipo_supported OUTPUT ipo_msg)
 if(ipo_supported)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
 endif()
+
+# Keep optimization decisions visible in CI. Directory options are inherited
+# by the core and Python subdirectories created below.
+get_directory_property(SUPERANSAC_EFFECTIVE_COMPILE_OPTIONS COMPILE_OPTIONS)
+get_directory_property(SUPERANSAC_EFFECTIVE_LINK_OPTIONS LINK_OPTIONS)
+message(STATUS
+  "SupeRANSAC compiler: id=${CMAKE_CXX_COMPILER_ID}; "
+  "frontend=${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}; "
+  "version=${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS
+  "SupeRANSAC release: native_arch=${SUPERANSAC_ENABLE_NATIVE_ARCH}; "
+  "fast_math=${SUPERANSAC_ENABLE_FAST_MATH}; ipo=${ipo_supported}")
+message(STATUS
+  "SupeRANSAC compile options: ${SUPERANSAC_EFFECTIVE_COMPILE_OPTIONS}")
+message(STATUS
+  "SupeRANSAC link options: ${SUPERANSAC_EFFECTIVE_LINK_OPTIONS}")
 
 # ---- Eigen: disable debug in release ----
 add_compile_definitions($<$<CONFIG:Release>:EIGEN_NO_DEBUG>)

@@ -6,29 +6,17 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from license_policy import REMOVED_GRAPH_CUT_FILES, RESTRICTED_LICENSE_PHRASES
+
 ROOT = Path(__file__).resolve().parents[1]
-REMOVED_FILES = {
-    "GCoptimization.cpp",
-    "GCoptimization.h",
-    "LinkedBlockList.cpp",
-    "LinkedBlockList.h",
-    "block.h",
-    "energy.h",
-    "graph.cpp",
-    "graph.h",
-    "maxflow.cpp",
-}
-RESTRICTED_PHRASES = (
-    b"research purposes only",
-    b"non-commercial research",
-    b"for research use only",
-)
 
 
 def main() -> int:
     local_optimization = ROOT / "include" / "local_optimization"
     returned = sorted(
-        path.name for path in local_optimization.iterdir() if path.name in REMOVED_FILES
+        path.name
+        for path in local_optimization.iterdir()
+        if path.name in REMOVED_GRAPH_CUT_FILES
     )
     violations: list[str] = []
     for source_root in (ROOT / "include", ROOT / "src", ROOT / "python"):
@@ -36,7 +24,7 @@ def main() -> int:
             if not path.is_file():
                 continue
             contents = path.read_bytes().lower()
-            for phrase in RESTRICTED_PHRASES:
+            for phrase in RESTRICTED_LICENSE_PHRASES:
                 if phrase in contents:
                     violations.append(
                         f"{path.relative_to(ROOT)} contains {phrase.decode('ascii')!r}"

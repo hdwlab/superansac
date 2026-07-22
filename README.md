@@ -22,11 +22,10 @@ Python, Windows system, and supported MSVC runtime DLLs remain dynamic dependenc
 Visual Studio, CMake, OpenCV, and vcpkg are not required on the installation
 machine.
 
-Linux release wheels are built on Ubuntu 24.04 with the `linux_x86_64` tag.
-The SupeRANSAC core is linked into the extension, but compatible system OpenCV
-runtime libraries are still required. On Ubuntu 24.04, installing
-`libopencv-core406t64` and `libopencv-calib3d406t64` provides those libraries.
-Portable manylinux wheels are not currently published.
+Linux release wheels use the manylinux_2_28 x86_64 policy. SupeRANSAC and the
+required OpenCV modules are statically linked, and the build uses a portable
+x86-64 compiler target rather than the hosted runner's native ISA. A separate
+OpenCV installation is not required on the installation machine.
 
 For a source build, clone this repository:
 

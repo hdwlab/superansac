@@ -10,6 +10,8 @@ from email.parser import BytesParser
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
 
+from license_policy import RESTRICTED_LICENSE_PHRASES
+
 REQUIRED_LICENSES = {
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
@@ -34,9 +36,13 @@ FORBIDDEN_BINARY_FRAGMENTS = (
     b"appdata/local/temp",
     b"github\\workspace",
     b"github/workspace",
-    b"research purposes only",
     b"gcoptimization",
-)
+) + RESTRICTED_LICENSE_PHRASES
+
+
+def is_linux_shared_library(name: str) -> bool:
+    basename = PurePosixPath(name).name.lower()
+    return basename.endswith(".so") or ".so." in basename
 
 
 def fail(message: str) -> None:
@@ -44,8 +50,13 @@ def fail(message: str) -> None:
 
 
 def audit(wheel: Path, platform: str) -> None:
-    expected_suffix = "win_amd64.whl" if platform == "windows" else "linux_x86_64.whl"
-    if not wheel.name.endswith(expected_suffix):
+    if platform == "windows":
+        platform_tag_matches = wheel.name.endswith("win_amd64.whl")
+    else:
+        platform_tag_matches = re.search(
+            r"[.-]manylinux(?:2014|_2_[0-9]+)_x86_64\.whl$", wheel.name
+        ) is not None
+    if not platform_tag_matches:
         fail(f"unexpected wheel platform tag: {wheel.name}")
 
     with ZipFile(wheel) as archive:
@@ -72,7 +83,9 @@ def audit(wheel: Path, platform: str) -> None:
             fail(f"fork project URL is missing: {urls}")
 
         included_license_names = {
-            PurePosixPath(name).name for name in names if ".dist-info/licenses/" in name
+            PurePosixPath(name).name
+            for name in names
+            if ".dist-info/licenses/" in name and not name.endswith("/")
         }
         missing_licenses = REQUIRED_LICENSES - included_license_names
         if missing_licenses:
@@ -100,8 +113,24 @@ def audit(wheel: Path, platform: str) -> None:
             dynamic_libraries = [name for name in names if name.lower().endswith(".dll")]
             if dynamic_libraries:
                 fail(f"Windows wheel unexpectedly contains DLLs: {dynamic_libraries}")
+        else:
+            bundled_libraries = [
+                name
+                for name in names
+                if is_linux_shared_library(name) and name not in extension_names
+            ]
+            if bundled_libraries:
+                fail(
+                    "Linux wheel unexpectedly bundles shared libraries: "
+                    f"{bundled_libraries}"
+                )
 
-        binary_names = [name for name in names if name.lower().endswith((".pyd", ".dll", ".so"))]
+        binary_names = [
+            name
+            for name in names
+            if name.lower().endswith((".pyd", ".dll"))
+            or is_linux_shared_library(name)
+        ]
         for name in binary_names:
             lowered = archive.read(name).lower()
             found = [
