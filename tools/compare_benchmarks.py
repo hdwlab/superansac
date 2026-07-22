@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail when candidate GCRANSAC time or memory regresses beyond a limit."""
+"""Compare candidate GCRANSAC results and resource usage with a baseline."""
 
 from __future__ import annotations
 
@@ -48,6 +48,7 @@ def main() -> int:
     parser.add_argument("baseline", type=Path)
     parser.add_argument("candidate", type=Path)
     parser.add_argument("--max-ratio", type=float, default=1.25)
+    parser.add_argument("--results-only", action="store_true")
     args = parser.parse_args()
 
     baseline = json.loads(args.baseline.read_text(encoding="utf-8"))["cases"]
@@ -56,11 +57,12 @@ def main() -> int:
         print("benchmark cases do not match", file=sys.stderr)
         return 1
 
-    failed = False
+    results_failed = False
+    performance_failed = False
     for case in baseline:
         if not results_match(baseline[case]["result"], candidate[case]["result"]):
             print(f"{case} points result: candidate differs from baseline")
-            failed = True
+            results_failed = True
         else:
             print(f"{case} points result: equivalent")
         for metric in ("median_seconds", "peak_rss_bytes"):
@@ -71,10 +73,13 @@ def main() -> int:
                 f"{case} points {metric}: baseline={reference:.6g}, "
                 f"candidate={current:.6g}, ratio={ratio:.3f}"
             )
-            if ratio > args.max_ratio:
-                failed = True
-    if failed:
+            if not args.results_only and ratio > args.max_ratio:
+                performance_failed = True
+    if results_failed:
+        print("benchmark results differ from the baseline", file=sys.stderr)
+    if performance_failed:
         print(f"performance regression exceeds {args.max_ratio:.2f}x", file=sys.stderr)
+    if results_failed or performance_failed:
         return 1
     return 0
 
