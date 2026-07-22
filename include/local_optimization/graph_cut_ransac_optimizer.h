@@ -147,6 +147,8 @@ namespace superansac
 				BinaryEnergy<double> problemGraph(
 					static_cast<size_t>(kData_.rows()), // The number of vertices
 					kNeighborNumber); // The number of edges
+				std::vector<double> distancePerThreshold(
+					static_cast<size_t>(kData_.rows()));
 
 				// The inner RANSAC loop
 				for (size_t iteration = 0; iteration < graphCutNumber; ++iteration)
@@ -166,6 +168,7 @@ namespace superansac
 						spatialCoherenceWeight, // The weight of the spatial coherence term
 						kThreshold, // The inlier-outlier threshold
 						&problemGraph, // The reusable problem graph
+						distancePerThreshold, // Reusable residual scratch storage
 						currentInliers); // The selected inliers
 
 					// Calculate the current sample size
@@ -266,6 +269,7 @@ namespace superansac
 				const double kLambda_, // The weight for the spatial coherence term
 				const double kThreshold_, // The kThreshold_ for the inlier-outlier decision
 				BinaryEnergy<double> *problemGraph, // The (reused) problem graph
+				std::vector<double> &distancePerThreshold, // Reusable residual scratch storage
 				std::vector<size_t> &inliers_) const // The resulting inlier set
 			{
 				// The number of points in the data set
@@ -279,7 +283,6 @@ namespace superansac
 					problemGraph->add_node();
 
 				// The distance and energy for each point
-				std::vector<double> distancePerThreshold(pointNumber);
 				double tmpSquaredDistance,
 					tmpEnergy;
 				const double squaredTruncatedThreshold = kThreshold_ * kThreshold_;
