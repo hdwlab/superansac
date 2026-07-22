@@ -93,13 +93,28 @@ def peak_rss_bytes() -> int:
     return int(peak if sys.platform == "darwin" else peak * 1024)
 
 
-def measured_call(correspondences: np.ndarray, image_sizes: np.ndarray) -> tuple[float, int]:
+def measured_call(
+    correspondences: np.ndarray, image_sizes: np.ndarray
+) -> tuple[float, int, tuple[object, object, object, object]]:
     started = time.perf_counter()
     result = pysuperansac.estimateHomography(correspondences, image_sizes, None, settings())
     elapsed = time.perf_counter() - started
     if not np.isfinite(np.asarray(result[0])).all():
         raise RuntimeError("benchmark produced a non-finite homography")
-    return elapsed, peak_rss_bytes()
+    return elapsed, peak_rss_bytes(), result
+
+
+def result_payload(result: tuple[object, object, object, object]) -> dict[str, object]:
+    model = np.asarray(result[0], dtype=np.float64)
+    scale = model[-1, -1]
+    if abs(scale) > np.finfo(np.float64).eps:
+        model = model / scale
+    return {
+        "model": model.tolist(),
+        "inliers": np.asarray(result[1], dtype=np.int64).tolist(),
+        "score": float(result[2]),
+        "iterations": int(result[3]),
+    }
 
 
 def main() -> int:
@@ -122,6 +137,7 @@ def main() -> int:
             "median_seconds": statistics.median(value[0] for value in measurements),
             "peak_rss_bytes": max(value[1] for value in measurements),
             "repetitions": args.repetitions,
+            "result": result_payload(measurements[0][2]),
         }
 
     payload = {
@@ -129,7 +145,21 @@ def main() -> int:
         "cases": cases,
     }
     args.output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(payload, indent=2))
+    summary = {
+        "module": payload["module"],
+        "cases": {
+            case: {
+                "median_seconds": values["median_seconds"],
+                "peak_rss_bytes": values["peak_rss_bytes"],
+                "repetitions": values["repetitions"],
+                "inlier_count": len(values["result"]["inliers"]),
+                "score": values["result"]["score"],
+                "iterations": values["result"]["iterations"],
+            }
+            for case, values in cases.items()
+        },
+    }
+    print(json.dumps(summary, indent=2))
     return 0
 
 

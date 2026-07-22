@@ -5,8 +5,42 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
+
+
+def results_match(reference: dict[str, object], current: dict[str, object]) -> bool:
+    if reference["inliers"] != current["inliers"]:
+        return False
+    if reference["iterations"] != current["iterations"]:
+        return False
+    if not math.isclose(
+        float(reference["score"]),
+        float(current["score"]),
+        rel_tol=1e-10,
+        abs_tol=1e-10,
+    ):
+        return False
+    reference_model = reference["model"]
+    current_model = current["model"]
+    if not isinstance(reference_model, list) or not isinstance(current_model, list):
+        return False
+    if len(reference_model) != len(current_model):
+        return False
+    return all(
+        len(reference_row) == len(current_row)
+        and all(
+            math.isclose(
+                float(reference_value),
+                float(current_value),
+                rel_tol=1e-10,
+                abs_tol=1e-10,
+            )
+            for reference_value, current_value in zip(reference_row, current_row)
+        )
+        for reference_row, current_row in zip(reference_model, current_model)
+    )
 
 
 def main() -> int:
@@ -24,6 +58,11 @@ def main() -> int:
 
     failed = False
     for case in baseline:
+        if not results_match(baseline[case]["result"], candidate[case]["result"]):
+            print(f"{case} points result: candidate differs from baseline")
+            failed = True
+        else:
+            print(f"{case} points result: equivalent")
         for metric in ("median_seconds", "peak_rss_bytes"):
             reference = baseline[case][metric]
             current = candidate[case][metric]
