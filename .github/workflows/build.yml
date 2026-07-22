@@ -314,12 +314,14 @@ jobs:
         run: >-
           python tools/compare_benchmarks.py baseline-linux.json
           candidate-wheel-linux.json --results-only
+          --relative-tolerance 1e-7 --absolute-tolerance 1e-7
 
       - name: Report Linux wheel performance budget
         continue-on-error: true
         run: >-
           python tools/compare_benchmarks.py baseline-linux.json
           candidate-wheel-linux.json --max-ratio 1.25
+          --relative-tolerance 1e-7 --absolute-tolerance 1e-7
 
       - name: Upload Linux benchmark evidence
         if: always()

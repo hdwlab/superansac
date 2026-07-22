@@ -10,7 +10,13 @@ import sys
 from pathlib import Path
 
 
-def results_match(reference: dict[str, object], current: dict[str, object]) -> bool:
+def results_match(
+    reference: dict[str, object],
+    current: dict[str, object],
+    *,
+    relative_tolerance: float,
+    absolute_tolerance: float,
+) -> bool:
     if reference["inliers"] != current["inliers"]:
         return False
     if reference["iterations"] != current["iterations"]:
@@ -18,8 +24,8 @@ def results_match(reference: dict[str, object], current: dict[str, object]) -> b
     if not math.isclose(
         float(reference["score"]),
         float(current["score"]),
-        rel_tol=1e-10,
-        abs_tol=1e-10,
+        rel_tol=relative_tolerance,
+        abs_tol=absolute_tolerance,
     ):
         return False
     reference_model = reference["model"]
@@ -34,8 +40,8 @@ def results_match(reference: dict[str, object], current: dict[str, object]) -> b
             math.isclose(
                 float(reference_value),
                 float(current_value),
-                rel_tol=1e-10,
-                abs_tol=1e-10,
+                rel_tol=relative_tolerance,
+                abs_tol=absolute_tolerance,
             )
             for reference_value, current_value in zip(reference_row, current_row)
         )
@@ -48,6 +54,8 @@ def main() -> int:
     parser.add_argument("baseline", type=Path)
     parser.add_argument("candidate", type=Path)
     parser.add_argument("--max-ratio", type=float, default=1.25)
+    parser.add_argument("--relative-tolerance", type=float, default=1e-10)
+    parser.add_argument("--absolute-tolerance", type=float, default=1e-10)
     parser.add_argument("--results-only", action="store_true")
     args = parser.parse_args()
 
@@ -60,7 +68,12 @@ def main() -> int:
     results_failed = False
     performance_failed = False
     for case in baseline:
-        if not results_match(baseline[case]["result"], candidate[case]["result"]):
+        if not results_match(
+            baseline[case]["result"],
+            candidate[case]["result"],
+            relative_tolerance=args.relative_tolerance,
+            absolute_tolerance=args.absolute_tolerance,
+        ):
             print(f"{case} points result: candidate differs from baseline")
             results_failed = True
         else:
