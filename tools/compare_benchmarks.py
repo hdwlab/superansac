@@ -58,6 +58,9 @@ def compare_quality(
     max_rmse_increase: float,
     max_precision_drop: float,
     max_recall_drop: float,
+    min_inlier_precision: float,
+    min_inlier_recall: float,
+    max_reprojection_rmse: float,
 ) -> bool:
     required_metrics = (
         "inlier_precision",
@@ -65,7 +68,7 @@ def compare_quality(
         "reprojection_rmse",
     )
     if any(metric not in reference or metric not in current for metric in required_metrics):
-        print(f"{case} points quality: required metrics are missing")
+        print(f"{case} quality: required metrics are missing")
         return False
 
     reference_precision = float(reference["inlier_precision"])
@@ -83,20 +86,23 @@ def compare_quality(
         reference_rmse + max_rmse_increase,
     )
 
+    case_label = f"{case} points" if case.isdigit() else case
     print(
-        f"{case} points inlier_precision: baseline={reference_precision:.6g}, "
+        f"{case_label} inlier_precision: baseline={reference_precision:.6g}, "
         f"candidate={current_precision:.6g}, "
-        f"delta={current_precision - reference_precision:+.3g}"
+        f"delta={current_precision - reference_precision:+.3g}, "
+        f"floor={min_inlier_precision:.6g}"
     )
     print(
-        f"{case} points inlier_recall: baseline={reference_recall:.6g}, "
+        f"{case_label} inlier_recall: baseline={reference_recall:.6g}, "
         f"candidate={current_recall:.6g}, "
-        f"delta={current_recall - reference_recall:+.3g}"
+        f"delta={current_recall - reference_recall:+.3g}, "
+        f"floor={min_inlier_recall:.6g}"
     )
     print(
-        f"{case} points reprojection_rmse: baseline={reference_rmse:.6g}, "
+        f"{case_label} reprojection_rmse: baseline={reference_rmse:.6g}, "
         f"candidate={current_rmse:.6g}, ratio={rmse_ratio:.3f}, "
-        f"limit={rmse_limit:.6g}"
+        f"relative_limit={rmse_limit:.6g}, absolute_limit={max_reprojection_rmse:.6g}"
     )
 
     return all(
@@ -113,6 +119,9 @@ def compare_quality(
         current_precision >= reference_precision - max_precision_drop
         and current_recall >= reference_recall - max_recall_drop
         and current_rmse <= rmse_limit
+        and current_precision >= min_inlier_precision
+        and current_recall >= min_inlier_recall
+        and current_rmse <= max_reprojection_rmse
     )
 
 
@@ -127,6 +136,9 @@ def main() -> int:
     parser.add_argument("--max-rmse-increase", type=float, default=0.05)
     parser.add_argument("--max-precision-drop", type=float, default=0.005)
     parser.add_argument("--max-recall-drop", type=float, default=0.005)
+    parser.add_argument("--min-inlier-precision", type=float, default=0.0)
+    parser.add_argument("--min-inlier-recall", type=float, default=0.0)
+    parser.add_argument("--max-reprojection-rmse", type=float, default=math.inf)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--results-only", action="store_true")
     mode.add_argument("--quality-only", action="store_true")
@@ -143,6 +155,7 @@ def main() -> int:
     quality_failed = False
     performance_failed = False
     for case in baseline:
+        case_label = f"{case} points" if case.isdigit() else case
         if not args.performance_only and not args.quality_only:
             if not results_match(
                 baseline[case]["result"],
@@ -150,10 +163,10 @@ def main() -> int:
                 relative_tolerance=args.relative_tolerance,
                 absolute_tolerance=args.absolute_tolerance,
             ):
-                print(f"{case} points result: candidate differs from baseline")
+                print(f"{case_label} result: candidate differs from baseline")
                 results_failed = True
             else:
-                print(f"{case} points result: equivalent")
+                print(f"{case_label} result: equivalent")
 
         if args.quality_only and not compare_quality(
             case,
@@ -163,6 +176,9 @@ def main() -> int:
             max_rmse_increase=args.max_rmse_increase,
             max_precision_drop=args.max_precision_drop,
             max_recall_drop=args.max_recall_drop,
+            min_inlier_precision=args.min_inlier_precision,
+            min_inlier_recall=args.min_inlier_recall,
+            max_reprojection_rmse=args.max_reprojection_rmse,
         ):
             quality_failed = True
 
@@ -172,7 +188,7 @@ def main() -> int:
                 current = candidate[case][metric]
                 ratio = current / reference
                 print(
-                    f"{case} points {metric}: baseline={reference:.6g}, "
+                    f"{case_label} {metric}: baseline={reference:.6g}, "
                     f"candidate={current:.6g}, ratio={ratio:.3f}"
                 )
                 if ratio > args.max_ratio:

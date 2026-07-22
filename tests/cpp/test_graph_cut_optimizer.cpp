@@ -13,6 +13,7 @@ namespace {
 
 using superansac::local_optimization::detail::estimateModelFromSample;
 using superansac::local_optimization::detail::mapSampleToDataIndices;
+using superansac::local_optimization::detail::sampleSizeForInlierPool;
 using superansac::models::Model;
 
 class RecordingEstimator {
@@ -61,6 +62,15 @@ void check_sample_mapping() {
     }
 }
 
+void check_sample_size() {
+    if (sampleSizeForInlierPool(0, 28) != 0 ||
+        sampleSizeForInlierPool(4, 28) != 4 ||
+        sampleSizeForInlierPool(28, 28) != 28 ||
+        sampleSizeForInlierPool(29, 28) != 28) {
+        throw std::runtime_error("The bounded sample size dropped or exceeded an inlier.");
+    }
+}
+
 void check_estimator_dispatch() {
     DataMatrix data;
     const std::array<std::size_t, 6> sample{0, 1, 2, 3, 4, 5};
@@ -97,6 +107,7 @@ void check_estimator_dispatch() {
 
 int main() {
     try {
+        check_sample_size();
         check_sample_mapping();
         check_estimator_dispatch();
     } catch (const std::exception& error) {

@@ -50,6 +50,13 @@ namespace superansac
 	{
 		namespace detail
 		{
+			inline size_t sampleSizeForInlierPool(
+				const size_t kInlierCount_,
+				const size_t kMaximumSampleSize_)
+			{
+				return std::min(kInlierCount_, kMaximumSampleSize_);
+			}
+
 			inline void mapSampleToDataIndices(
 				const std::vector<size_t> &kInliers_,
 				const size_t kSampleSize_,
@@ -204,7 +211,7 @@ namespace superansac
 					// Calculate the current sample size. Use every inlier when the
 					// graph cut returns a small pool; otherwise draw a bounded
 					// non-minimal sample from that pool.
-					currentSampleSize = std::min(
+					currentSampleSize = detail::sampleSizeForInlierPool(
 						currentInliers.size(), kNonMinimalSampleSize);
 
 					// Break if the sample size is too small
