@@ -156,13 +156,19 @@ public:
             const Capacity sink_energy = unary_terms_[variable][1] - minimum;
 
             // A source->variable edge is cut when the variable is in Sink.
-            add_arc(source_vertex, variable, sink_energy);
+            if (sink_energy > Capacity{0}) {
+                add_arc(source_vertex, variable, sink_energy);
+            }
             // A variable->sink edge is cut when the variable is in Source.
-            add_arc(variable, sink_vertex, source_energy);
+            if (source_energy > Capacity{0}) {
+                add_arc(variable, sink_vertex, source_energy);
+            }
         }
 
         for (const PairwiseTerm& term : pairwise_terms_) {
-            add_arc(term.first, term.second, term.capacity);
+            if (term.capacity > Capacity{0}) {
+                add_arc(term.first, term.second, term.capacity);
+            }
         }
 
         const Capacity flow = maximum_flow(source_vertex, sink_vertex);
@@ -274,14 +280,23 @@ private:
             throw std::length_error("BinaryEnergy graph is too large.");
         }
         degree_counts_.assign(vertex_count, 0);
-        degree_counts_[variable_count] = variable_count;
-        degree_counts_[variable_count + 1] = variable_count;
         for (std::size_t variable = 0; variable < variable_count; ++variable) {
-            degree_counts_[variable] = 2;
+            const Capacity minimum =
+                std::min(unary_terms_[variable][0], unary_terms_[variable][1]);
+            if (unary_terms_[variable][1] - minimum > Capacity{0}) {
+                ++degree_counts_[variable_count];
+                ++degree_counts_[variable];
+            }
+            if (unary_terms_[variable][0] - minimum > Capacity{0}) {
+                ++degree_counts_[variable];
+                ++degree_counts_[variable_count + 1];
+            }
         }
         for (const PairwiseTerm& term : pairwise_terms_) {
-            ++degree_counts_[term.first];
-            ++degree_counts_[term.second];
+            if (term.capacity > Capacity{0}) {
+                ++degree_counts_[term.first];
+                ++degree_counts_[term.second];
+            }
         }
         flow_offsets_.resize(vertex_count + 1);
         flow_offsets_[0] = 0;
