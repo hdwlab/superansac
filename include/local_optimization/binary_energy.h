@@ -226,6 +226,14 @@ private:
         FlowIndex target;
         FlowIndex reverse;
         Capacity residual;
+
+        // The graph builder overwrites every slot after resize(). Avoid a
+        // redundant zero-fill of the full edge array on each labeling.
+        FlowEdge() noexcept {}
+        FlowEdge(const FlowIndex target_,
+                 const FlowIndex reverse_,
+                 const Capacity residual_) noexcept
+            : target(target_), reverse(reverse_), residual(residual_) {}
     };
 
     struct PairwiseTerm {
@@ -312,9 +320,9 @@ private:
         const FlowIndex forward_index = insertion_offsets_[from]++;
         const FlowIndex reverse_index = insertion_offsets_[to]++;
         flow_edges_[forward_index] =
-            {static_cast<FlowIndex>(to), reverse_index, value};
+            FlowEdge(static_cast<FlowIndex>(to), reverse_index, value);
         flow_edges_[reverse_index] =
-            {static_cast<FlowIndex>(from), forward_index, Capacity{0}};
+            FlowEdge(static_cast<FlowIndex>(from), forward_index, Capacity{0});
     }
 
     bool build_level_graph(const std::size_t source,
