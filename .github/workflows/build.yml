@@ -35,12 +35,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libeigen3-dev libopencv-dev ninja-build
           python -m pip install --upgrade pip
-          python -m pip install build==1.5.0 pytest==9.0.2
+          python -m pip install build==1.5.0 pybind11==3.0.4 pytest==9.0.2
 
       - name: Configure and run C++ tests
         run: |
           python tools/audit_source_licenses.py
           cmake -S . -B build/cpp-tests -G Ninja \
+            -Dpybind11_DIR="$(python -m pybind11 --cmakedir)" \
             -DSUPERANSAC_BUILD_SHARED_CORE=OFF \
             -DSUPERANSAC_BUILD_TESTS=ON
           cmake --build build/cpp-tests
@@ -74,12 +75,6 @@ jobs:
       VCPKG_ROOT: ${{ github.workspace }}\.vcpkg
       VCPKG_INSTALLED_DIR: ${{ github.workspace }}\vcpkg_installed
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg-cache
-      CMAKE_ARGS: >-
-        -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/.vcpkg/scripts/buildsystems/vcpkg.cmake
-        -DVCPKG_TARGET_TRIPLET=x64-windows-static-md-release
-        -DVCPKG_INSTALLED_DIR=${{ github.workspace }}/vcpkg_installed
-        -DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}/triplets
-        -DSUPERANSAC_BUILD_SHARED_CORE=OFF
     steps:
       - name: Check out source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -116,6 +111,19 @@ jobs:
         run: |
           $epoch = git show -s --format=%ct HEAD
           "SOURCE_DATE_EPOCH=$epoch" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure CMake arguments
+        shell: pwsh
+        run: |
+          $workspace = $env:GITHUB_WORKSPACE.Replace('\', '/')
+          $cmakeArguments = @(
+            "-DCMAKE_TOOLCHAIN_FILE=$workspace/.vcpkg/scripts/buildsystems/vcpkg.cmake"
+            "-DVCPKG_TARGET_TRIPLET=x64-windows-static-md-release"
+            "-DVCPKG_INSTALLED_DIR=$workspace/vcpkg_installed"
+            "-DVCPKG_OVERLAY_TRIPLETS=$workspace/triplets"
+            "-DSUPERANSAC_BUILD_SHARED_CORE=OFF"
+          ) -join ' '
+          "CMAKE_ARGS=$cmakeArguments" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build wheel through PEP 517
         run: python -m build --wheel --outdir dist
