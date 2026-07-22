@@ -147,7 +147,6 @@ public:
         prepare_flow_graph(variable_count + 2, variable_count);
 
         Capacity normalized_constant = constant_;
-        Capacity largest_capacity = Capacity{1};
 
         for (std::size_t variable = 0; variable < variable_count; ++variable) {
             const Capacity minimum =
@@ -160,19 +159,14 @@ public:
             add_arc(source_vertex, variable, sink_energy);
             // A variable->sink edge is cut when the variable is in Source.
             add_arc(variable, sink_vertex, source_energy);
-            largest_capacity =
-                std::max({largest_capacity, source_energy, sink_energy});
         }
 
         for (const PairwiseTerm& term : pairwise_terms_) {
             add_arc(term.first, term.second, term.capacity);
-            largest_capacity = std::max(largest_capacity, term.capacity);
         }
 
         const Capacity flow = maximum_flow(source_vertex, sink_vertex);
 
-        const Capacity residual_tolerance =
-            Capacity{64} * std::numeric_limits<Capacity>::epsilon() * largest_capacity;
         std::vector<unsigned char> source_reachable(variable_count + 2, 0);
         bfs_queue_.clear();
         source_reachable[source_vertex] = 1;
@@ -182,7 +176,7 @@ public:
             for (FlowIndex edge_index = flow_offsets_[current];
                  edge_index < flow_offsets_[current + 1]; ++edge_index) {
                 const FlowEdge& edge = flow_edges_[edge_index];
-                if (edge.residual <= residual_tolerance) {
+                if (edge.residual <= Capacity{0}) {
                     continue;
                 }
                 const std::size_t target = edge.target;

@@ -123,6 +123,13 @@ void check_edge_cases() {
         throw std::runtime_error("Reset or negative unary normalization failed.");
     }
 
+    Energy tiny(1, 0);
+    tiny.add_node();
+    tiny.add_term1(0, 0.0, 1e-20);
+    if (tiny.minimize() != 0.0 || tiny.get_var(0) != 0) {
+        throw std::runtime_error("Tiny positive capacity produced an inconsistent cut.");
+    }
+
     bool non_submodular_rejected = false;
     try {
         Energy invalid(2, 1);
