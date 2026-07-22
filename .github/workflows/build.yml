@@ -141,10 +141,10 @@ jobs:
         include:
           - python-version: "3.10"
             python-tag: "310"
-            compiler: "msvc"
+            compiler: "clang-cl"
           - python-version: "3.11"
             python-tag: "311"
-            compiler: "msvc"
+            compiler: "clang-cl"
           - python-version: "3.12"
             python-tag: "312"
             compiler: "clang-cl"

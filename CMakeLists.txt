@@ -36,7 +36,40 @@ function(add_flag_if_supported flag)
 endfunction()
 
 # ---- Baseline high-performance flags ----
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+# clang-cl reports Clang as its compiler ID while using the MSVC command-line
+# and ABI. Handle MSVC-compatible frontends first so Windows builds retain the
+# runtime, reproducibility, and linker settings shared by both compilers.
+if(MSVC)
+  add_compile_options(
+    $<$<CONFIG:Release>:/O2>
+    $<$<CONFIG:Release>:/Ob3>
+    $<$<CONFIG:Release>:/Oi>
+    $<$<CONFIG:Release>:/Gy>
+    $<$<CONFIG:Release>:/Gw>
+    $<$<CONFIG:Release>:/DNDEBUG>
+    $<$<CONFIG:Release>:/MP>
+    $<$<CONFIG:Release>:/Zc:inline>
+    $<$<CONFIG:Release>:/W0>
+  )
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    add_compile_options($<$<CONFIG:Release>:/GL>)
+    add_link_options($<$<CONFIG:Release>:/LTCG>)
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    add_compile_options(
+      $<$<CONFIG:Release>:/clang:-O3>
+      $<$<CONFIG:Release>:/clang:-funroll-loops>
+    )
+  endif()
+  file(TO_NATIVE_PATH "${PROJECT_SOURCE_DIR}" SUPERANSAC_SOURCE_PATH_NATIVE)
+  file(TO_NATIVE_PATH "${PROJECT_BINARY_DIR}" SUPERANSAC_BUILD_PATH_NATIVE)
+  add_compile_options(
+    "/pathmap:${SUPERANSAC_SOURCE_PATH_NATIVE}=."
+    "/pathmap:${SUPERANSAC_BUILD_PATH_NATIVE}=.build"
+  )
+  add_link_options($<$<CONFIG:Release>:/Brepro>)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY
+    "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   add_flag_if_supported(-O3)
   add_flag_if_supported(-march=native)
   add_flag_if_supported(-mtune=native)
@@ -65,39 +98,16 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   add_flag_if_supported(-fomit-frame-pointer)
   add_flag_if_supported(-finline-functions)
   add_compile_options($<$<CONFIG:Release>:-DNDEBUG>)
-elseif(MSVC)
-  add_compile_options(
-    $<$<CONFIG:Release>:/O2>
-    $<$<CONFIG:Release>:/Oi>
-    $<$<CONFIG:Release>:/GL>
-    $<$<CONFIG:Release>:/Gy>
-    $<$<CONFIG:Release>:/DNDEBUG>
-    $<$<CONFIG:Release>:/MP>
-    $<$<CONFIG:Release>:/Zc:inline>
-    $<$<CONFIG:Release>:/W0>
-  )
-  file(TO_NATIVE_PATH "${PROJECT_SOURCE_DIR}" SUPERANSAC_SOURCE_PATH_NATIVE)
-  file(TO_NATIVE_PATH "${PROJECT_BINARY_DIR}" SUPERANSAC_BUILD_PATH_NATIVE)
-  add_compile_options(
-    "/pathmap:${SUPERANSAC_SOURCE_PATH_NATIVE}=."
-    "/pathmap:${SUPERANSAC_BUILD_PATH_NATIVE}=.build"
-  )
-  add_link_options(
-    $<$<CONFIG:Release>:/LTCG>
-    $<$<CONFIG:Release>:/Brepro>
-  )
-  set(CMAKE_MSVC_RUNTIME_LIBRARY
-    "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 endif()
 
 # ---- Optional fast-math flags ----
 if(SUPERANSAC_ENABLE_FAST_MATH)
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  if(MSVC)
+    add_compile_options($<$<CONFIG:Release>:/fp:fast>)
+  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     add_flag_if_supported(-ffast-math)
     add_flag_if_supported(-fno-math-errno)
     add_flag_if_supported(-ffp-contract=fast)
-  elseif(MSVC)
-    add_compile_options($<$<CONFIG:Release>:/fp:fast>)
   endif()
 endif()
 
