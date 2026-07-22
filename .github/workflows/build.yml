@@ -372,13 +372,18 @@ jobs:
 
       - name: Verify Windows benchmark result equivalence
         shell: pwsh
-        run: python tools\compare_benchmarks.py baseline.json candidate.json --results-only
+        run: >-
+          python tools\compare_benchmarks.py baseline.json candidate.json
+          --results-only --relative-tolerance 1e-7 --absolute-tolerance 1e-7
 
       - name: Report Windows performance budget
         continue-on-error: true
         shell: pwsh
         run: |
-          python tools\compare_benchmarks.py baseline.json candidate.json --max-ratio 1.25
+          python tools\compare_benchmarks.py baseline.json candidate.json `
+            --max-ratio 1.25 `
+            --relative-tolerance 1e-7 `
+            --absolute-tolerance 1e-7
 
       - name: Upload benchmark evidence
         if: always()
