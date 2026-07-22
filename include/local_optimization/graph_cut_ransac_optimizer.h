@@ -33,8 +33,11 @@
 // Author: Daniel Barath (barath.daniel@sztaki.mta.hu)
 #pragma once
 
+#include <algorithm>
 #include <vector>
 #include <Eigen/Core>
+#include "../estimators/abstract_estimator.h"
+#include "../scoring/abstract_scoring.h"
 #include "abstract_local_optimizer.h"
 #include "../samplers/uniform_random_sampler.h"
 #include "../neighborhood/abstract_neighborhood.h"
@@ -45,6 +48,33 @@ namespace superansac
 {
 	namespace local_optimization
 	{
+		namespace detail
+		{
+			inline void mapSampleToDataIndices(
+				const std::vector<size_t> &kInliers_,
+				const size_t kSampleSize_,
+				size_t *sample_)
+			{
+				for (size_t sampleIdx = 0; sampleIdx < kSampleSize_; ++sampleIdx)
+					sample_[sampleIdx] = kInliers_[sample_[sampleIdx]];
+			}
+
+			template <typename EstimatorType>
+			bool estimateModelFromSample(
+				const DataMatrix &kData_,
+				const size_t *kSample_,
+				const size_t kSampleSize_,
+				const EstimatorType *kEstimator_,
+				std::vector<models::Model> *models_)
+			{
+				if (kSampleSize_ > kEstimator_->sampleSize())
+					return kEstimator_->estimateModelNonminimal(
+						kData_, kSample_, kSampleSize_, models_, nullptr);
+
+				return kEstimator_->estimateModel(kData_, kSample_, models_);
+			}
+		}
+
 		// Templated class for estimating a model for RANSAC. This class is purely a
 		// virtual class and should be implemented for the specific task that RANSAC is
 		// being used for. Two methods must be implemented: estimateModel and residual. All
@@ -171,10 +201,11 @@ namespace superansac
 						distancePerThreshold, // Reusable residual scratch storage
 						currentInliers); // The selected inliers
 
-					// Calculate the current sample size
-					currentSampleSize = currentInliers.size() - 1;
-					if (currentSampleSize >= kNonMinimalSampleSize)
-						currentSampleSize = kNonMinimalSampleSize;
+					// Calculate the current sample size. Use every inlier when the
+					// graph cut returns a small pool; otherwise draw a bounded
+					// non-minimal sample from that pool.
+					currentSampleSize = std::min(
+						currentInliers.size(), kNonMinimalSampleSize);
 
 					// Break if the sample size is too small
 					if (currentSampleSize < kEstimator_->sampleSize())
@@ -194,13 +225,12 @@ namespace superansac
 						// If there are enough inliers to estimate the model, use all of them
 						if (currentSampleSize == currentInliers.size())
 						{
-							// Estimate the model
-							if (!kEstimator_->estimateModelNonminimal(
-								kData_,  // The data points
-								&currentInliers[0], // Selected minimal sample
-								currentSampleSize, // The size of the minimal sample
-								&currentlyEstimatedModels, // The estimated models
-								nullptr)) // The indices of the inliers
+							if (!detail::estimateModelFromSample(
+								kData_,
+								currentInliers.data(),
+								currentSampleSize,
+								kEstimator_,
+								&currentlyEstimatedModels))
 								continue;
 						} else
 						{
@@ -210,21 +240,22 @@ namespace superansac
 								currentSample)) // Sample indices
 								continue;
 
-							// Estimate the model
-							if (currentSampleSize > kEstimator_->sampleSize())
-								if (!kEstimator_->estimateModelNonminimal(
-									kData_,  // The data points
-									currentSample, // Selected minimal sample
-									currentSampleSize, // The size of the minimal sample
-									&currentlyEstimatedModels, // The estimated models
-									nullptr)) // The indices of the inliers
-									continue;
-							else
-								if (!kEstimator_->estimateModel(
-									kData_,  // The data points
-									currentSample, // Selected minimal sample
-									&currentlyEstimatedModels)) // The estimated models
-									continue;
+
+							// The sampler returns indices into currentInliers. Convert
+							// them to rows of the original data matrix before fitting.
+							detail::mapSampleToDataIndices(
+								currentInliers, currentSampleSize, currentSample);
+
+							// Select exactly one estimator for the sample size. Keeping
+							// this dispatch in one helper also prevents a dangling else
+							// from running both estimators after a successful fit.
+							if (!detail::estimateModelFromSample(
+								kData_,
+								currentSample,
+								currentSampleSize,
+								kEstimator_,
+								&currentlyEstimatedModels))
+								continue;
 						}
 
 						// Calculate the scoring of the estimated model
