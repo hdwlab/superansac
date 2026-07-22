@@ -55,6 +55,7 @@ def settings() -> pysuperansac.RANSACSettings:
 
 def peak_rss_bytes() -> int:
     if os.name == "nt":
+        from ctypes import wintypes
 
         class ProcessMemoryCounters(ctypes.Structure):
             _fields_ = [
@@ -72,11 +73,20 @@ def peak_rss_bytes() -> int:
 
         counters = ProcessMemoryCounters()
         counters.cb = ctypes.sizeof(counters)
-        process = ctypes.windll.kernel32.GetCurrentProcess()
-        if not ctypes.windll.psapi.GetProcessMemoryInfo(
-            process, ctypes.byref(counters), counters.cb
-        ):
-            raise ctypes.WinError()
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        kernel32.GetCurrentProcess.argtypes = []
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        psapi.GetProcessMemoryInfo.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(ProcessMemoryCounters),
+            wintypes.DWORD,
+        ]
+        psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+
+        process = kernel32.GetCurrentProcess()
+        if not psapi.GetProcessMemoryInfo(process, ctypes.byref(counters), counters.cb):
+            raise ctypes.WinError(ctypes.get_last_error())
         return int(counters.PeakWorkingSetSize)
 
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
