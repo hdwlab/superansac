@@ -27,7 +27,6 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <queue>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -175,20 +174,21 @@ public:
         const Capacity residual_tolerance =
             Capacity{64} * std::numeric_limits<Capacity>::epsilon() * largest_capacity;
         std::vector<unsigned char> source_reachable(variable_count + 2, 0);
-        std::queue<std::size_t> frontier;
+        bfs_queue_.clear();
         source_reachable[source_vertex] = 1;
-        frontier.push(source_vertex);
-        while (!frontier.empty()) {
-            const std::size_t current = frontier.front();
-            frontier.pop();
-            for (const FlowEdge& edge : flow_graph_[current]) {
+        bfs_queue_.push_back(source_vertex);
+        for (std::size_t head = 0; head < bfs_queue_.size(); ++head) {
+            const std::size_t current = bfs_queue_[head];
+            for (FlowIndex edge_index = flow_offsets_[current];
+                 edge_index < flow_offsets_[current + 1]; ++edge_index) {
+                const FlowEdge& edge = flow_edges_[edge_index];
                 if (edge.residual <= residual_tolerance) {
                     continue;
                 }
                 const std::size_t target = edge.target;
                 if (source_reachable[target] == 0) {
                     source_reachable[target] = 1;
-                    frontier.push(target);
+                    bfs_queue_.push_back(target);
                 }
             }
         }
@@ -271,7 +271,6 @@ private:
         if (vertex_count > std::numeric_limits<FlowIndex>::max()) {
             throw std::length_error("BinaryEnergy graph is too large.");
         }
-        flow_graph_.resize(vertex_count);
         degree_counts_.assign(vertex_count, 0);
         degree_counts_[variable_count] = variable_count;
         degree_counts_[variable_count + 1] = variable_count;
@@ -282,15 +281,26 @@ private:
             ++degree_counts_[term.first];
             ++degree_counts_[term.second];
         }
+        flow_offsets_.resize(vertex_count + 1);
+        flow_offsets_[0] = 0;
+        std::size_t directed_edge_count = 0;
         for (std::size_t vertex = 0; vertex < vertex_count; ++vertex) {
-            flow_graph_[vertex].clear();
-            flow_graph_[vertex].reserve(degree_counts_[vertex]);
+            if (degree_counts_[vertex] >
+                std::numeric_limits<FlowIndex>::max() - directed_edge_count) {
+                throw std::length_error("BinaryEnergy graph has too many edges.");
+            }
+            directed_edge_count += degree_counts_[vertex];
+            flow_offsets_[vertex + 1] =
+                static_cast<FlowIndex>(directed_edge_count);
         }
+        flow_edges_.resize(directed_edge_count);
+        insertion_offsets_.assign(flow_offsets_.begin(), flow_offsets_.end() - 1);
         levels_.resize(vertex_count);
         next_edges_.resize(vertex_count);
         path_vertices_.reserve(vertex_count);
         path_edges_.reserve(vertex_count);
         path_capacities_.reserve(vertex_count);
+        bfs_queue_.reserve(vertex_count);
     }
 
     void add_arc(const std::size_t from,
@@ -299,30 +309,25 @@ private:
         if (value < Capacity{0} || !is_finite(value)) {
             throw std::invalid_argument("Graph capacities must be finite and non-negative.");
         }
-        if (flow_graph_[from].size() >= std::numeric_limits<FlowIndex>::max() ||
-            flow_graph_[to].size() >= std::numeric_limits<FlowIndex>::max()) {
-            throw std::length_error("BinaryEnergy vertex degree is too large.");
-        }
-        const FlowIndex forward_index =
-            static_cast<FlowIndex>(flow_graph_[from].size());
-        const FlowIndex reverse_index =
-            static_cast<FlowIndex>(flow_graph_[to].size());
-        flow_graph_[from].push_back(
-            {static_cast<FlowIndex>(to), reverse_index, value});
-        flow_graph_[to].push_back(
-            {static_cast<FlowIndex>(from), forward_index, Capacity{0}});
+        const FlowIndex forward_index = insertion_offsets_[from]++;
+        const FlowIndex reverse_index = insertion_offsets_[to]++;
+        flow_edges_[forward_index] =
+            {static_cast<FlowIndex>(to), reverse_index, value};
+        flow_edges_[reverse_index] =
+            {static_cast<FlowIndex>(from), forward_index, Capacity{0}};
     }
 
     bool build_level_graph(const std::size_t source,
                            const std::size_t sink) {
         std::fill(levels_.begin(), levels_.end(), -1);
-        std::queue<std::size_t> frontier;
+        bfs_queue_.clear();
         levels_[source] = 0;
-        frontier.push(source);
-        while (!frontier.empty()) {
-            const std::size_t current = frontier.front();
-            frontier.pop();
-            for (const FlowEdge& edge : flow_graph_[current]) {
+        bfs_queue_.push_back(source);
+        for (std::size_t head = 0; head < bfs_queue_.size(); ++head) {
+            const std::size_t current = bfs_queue_[head];
+            for (FlowIndex edge_index = flow_offsets_[current];
+                 edge_index < flow_offsets_[current + 1]; ++edge_index) {
+                const FlowEdge& edge = flow_edges_[edge_index];
                 if (edge.residual <= Capacity{0} || levels_[edge.target] >= 0) {
                     continue;
                 }
@@ -330,7 +335,7 @@ private:
                 if (edge.target == sink) {
                     return true;
                 }
-                frontier.push(edge.target);
+                bfs_queue_.push_back(edge.target);
             }
         }
         return levels_[sink] >= 0;
@@ -349,25 +354,24 @@ private:
             if (current == sink) {
                 const Capacity sent = path_capacities_.back();
                 for (std::size_t depth = 0; depth < path_edges_.size(); ++depth) {
-                    FlowEdge& edge =
-                        flow_graph_[path_vertices_[depth]][path_edges_[depth]];
+                    FlowEdge& edge = flow_edges_[path_edges_[depth]];
                     edge.residual -= sent;
-                    flow_graph_[edge.target][edge.reverse].residual += sent;
+                    flow_edges_[edge.reverse].residual += sent;
                 }
                 return sent;
             }
 
             FlowIndex& edge_index = next_edges_[current];
-            while (edge_index < flow_graph_[current].size()) {
-                const FlowEdge& edge = flow_graph_[current][edge_index];
+            while (edge_index < flow_offsets_[current + 1]) {
+                const FlowEdge& edge = flow_edges_[edge_index];
                 if (edge.residual > Capacity{0} &&
                     levels_[edge.target] == levels_[current] + 1) {
                     break;
                 }
                 ++edge_index;
             }
-            if (edge_index < flow_graph_[current].size()) {
-                const FlowEdge& edge = flow_graph_[current][edge_index];
+            if (edge_index < flow_offsets_[current + 1]) {
+                const FlowEdge& edge = flow_edges_[edge_index];
                 path_edges_.push_back(edge_index);
                 path_vertices_.push_back(edge.target);
                 path_capacities_.push_back(
@@ -393,7 +397,8 @@ private:
                           const std::size_t sink) {
         Capacity total = Capacity{0};
         while (build_level_graph(source, sink)) {
-            std::fill(next_edges_.begin(), next_edges_.end(), FlowIndex{0});
+            std::copy(flow_offsets_.begin(), flow_offsets_.end() - 1,
+                      next_edges_.begin());
             while (true) {
                 const Capacity sent = send_flow(source, sink);
                 if (sent <= Capacity{0}) {
@@ -409,10 +414,13 @@ private:
     std::vector<std::array<Capacity, 2>> unary_terms_;
     std::vector<PairwiseTerm> pairwise_terms_;
     std::vector<Segment> segments_;
-    std::vector<std::vector<FlowEdge>> flow_graph_;
+    std::vector<FlowEdge> flow_edges_;
+    std::vector<FlowIndex> flow_offsets_;
+    std::vector<FlowIndex> insertion_offsets_;
     std::vector<std::size_t> degree_counts_;
     std::vector<int> levels_;
     std::vector<FlowIndex> next_edges_;
+    std::vector<std::size_t> bfs_queue_;
     std::vector<std::size_t> path_vertices_;
     std::vector<FlowIndex> path_edges_;
     std::vector<Capacity> path_capacities_;
