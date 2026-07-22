@@ -16,28 +16,42 @@ env:
   VCPKG_DEFAULT_TRIPLET: x64-windows-static-md-release
 
 jobs:
-  linux-regression:
-    name: Linux build and regression tests
+  linux-wheels:
+    name: Linux CP${{ matrix.python-tag }} wheel
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: "3.10"
+            python-tag: "310"
+          - python-version: "3.11"
+            python-tag: "311"
+          - python-version: "3.12"
+            python-tag: "312"
+    env:
+      CMAKE_ARGS: -DSUPERANSAC_BUILD_SHARED_CORE=OFF
     steps:
       - name: Check out source
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
 
-      - name: Set up Python 3.12
+      - name: Set up Python ${{ matrix.python-version }} x64
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
+          architecture: x64
 
       - name: Install system and Python build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libeigen3-dev libopencv-dev ninja-build
           python -m pip install --upgrade pip
-          python -m pip install build==1.5.0 pybind11==3.0.4 pytest==9.0.2
+          python -m pip install build==1.5.0 pybind11==3.0.4 pytest==9.0.2 twine==6.2.0
 
       - name: Configure and run C++ tests
+        if: matrix.python-version == '3.12'
         run: |
           python tools/audit_source_licenses.py
           cmake -S . -B build/cpp-tests -G Ninja \
@@ -47,16 +61,76 @@ jobs:
           cmake --build build/cpp-tests
           ctest --test-dir build/cpp-tests --output-on-failure
 
-      - name: Build Linux wheel through PEP 517
-        run: |
-          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
-          python -m build --wheel --outdir dist
+      - name: Record reproducible-build epoch
+        run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
 
-      - name: Audit and test installed Linux wheel
+      - name: Build wheel through PEP 517
+        run: python -m build --wheel --outdir dist
+
+      - name: Check wheel tag, metadata, contents, and licenses
         run: |
-          python tools/audit_wheel.py dist/*.whl --platform linux
-          python -m pip install --force-reinstall dist/*.whl
-          python -m pytest tests/python/test_wheel_smoke.py -q
+          wheels=(dist/*.whl)
+          if (( ${#wheels[@]} != 1 )); then
+            echo "Expected one wheel, found ${#wheels[@]}" >&2
+            exit 1
+          fi
+          if [[ "$(basename "${wheels[0]}")" != *-cp${{ matrix.python-tag }}-cp${{ matrix.python-tag }}-linux_x86_64.whl ]]; then
+            echo "Unexpected wheel tag: ${wheels[0]}" >&2
+            exit 1
+          fi
+          python -m twine check "${wheels[0]}"
+          python tools/audit_wheel.py "${wheels[0]}" --platform linux
+
+      - name: Check ELF dependencies
+        run: |
+          extracted="$RUNNER_TEMP/wheel-contents-${{ matrix.python-tag }}"
+          python -m zipfile -e dist/*.whl "$extracted"
+          extension="$(find "$extracted" -type f -name 'pysuperansac*.so' -print -quit)"
+          if [[ -z "$extension" ]]; then
+            echo "Python extension was not found in the wheel" >&2
+            exit 1
+          fi
+          dependencies="$(ldd "$extension")"
+          echo "$dependencies"
+          if [[ "$dependencies" == *"not found"* ]]; then
+            echo "Wheel has an unresolved ELF dependency" >&2
+            exit 1
+          fi
+          if [[ "$dependencies" == *"superansac_core"* ]]; then
+            echo "SupeRANSAC core was not linked into the extension" >&2
+            exit 1
+          fi
+
+      - name: Install in a clean environment and run public API tests
+        run: |
+          test_environment="$RUNNER_TEMP/wheel-test-${{ matrix.python-tag }}"
+          python -m venv "$test_environment"
+          test_python="$test_environment/bin/python"
+          "$test_python" -m pip install --upgrade pip
+          "$test_python" -m pip install dist/*.whl pytest==9.0.2
+          "$test_python" -m pytest tests/python/test_wheel_smoke.py -q
+          "$test_python" -m pip uninstall --yes pysuperansac
+          "$test_python" -c "import importlib.util; assert importlib.util.find_spec('pysuperansac') is None"
+
+      - name: Rebuild and verify byte-for-byte reproducibility
+        if: matrix.python-version == '3.12'
+        run: |
+          python -m build --wheel --outdir dist-repro
+          first="$(sha256sum dist/*.whl)"
+          first="${first%% *}"
+          second="$(sha256sum dist-repro/*.whl)"
+          second="${second%% *}"
+          echo "first:  $first"
+          echo "second: $second"
+          [[ "$first" == "$second" ]]
+
+      - name: Upload verified wheel
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wheel-linux-py${{ matrix.python-version }}
+          path: dist/*.whl
+          if-no-files-found: error
+          retention-days: 14
 
   windows-wheels:
     name: Windows CP${{ matrix.python-tag }} wheel
@@ -182,7 +256,7 @@ jobs:
       - name: Upload verified wheel
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: wheel-py${{ matrix.python-version }}
+          name: wheel-windows-py${{ matrix.python-version }}
           path: dist/*.whl
           if-no-files-found: error
           retention-days: 14
@@ -204,7 +278,7 @@ jobs:
       - name: Download candidate wheel
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: wheel-py3.12
+          name: wheel-windows-py3.12
           path: candidate-wheel
 
       - name: Download the rc.2 baseline wheel
@@ -238,7 +312,7 @@ jobs:
 
   release:
     name: Publish tag artifacts
-    needs: [linux-regression, windows-wheels, performance]
+    needs: [linux-wheels, windows-wheels, performance]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:
@@ -257,7 +331,7 @@ jobs:
       - name: Download all verified wheels
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: wheel-py*
+          pattern: wheel-*-py*
           merge-multiple: true
           path: dist
 
@@ -266,13 +340,16 @@ jobs:
           cd dist
           sha256sum -- *.whl | sort -k2 > SHA256SUMS.txt
           cat > RELEASE_NOTES.md <<'EOF'
-          Windows x64 wheels for CPython 3.10, 3.11, and 3.12.
+          Windows x64 and Linux x86_64 wheels for CPython 3.10, 3.11, and 3.12.
 
-          - Core, OpenCV core/calib3d, and zlib are statically linked; Eigen is header-only.
+          - Windows: Core, OpenCV core/calib3d, and zlib are statically linked; Eigen is header-only.
           - MSVC runtime is dynamically linked (`/MD`).
+          - Linux: Core is statically linked into the extension; compatible system OpenCV runtime libraries are required.
+          - Linux wheels are built on Ubuntu 24.04 and use the `linux_x86_64` platform tag.
           - Upstream base: `27de48676f07704856fb5619dd31cde807d0661d`
           - vcpkg baseline: `cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3`
-          - Each wheel passed clean-environment import, GCRANSAC homography, DLL, license, path-leak, and metadata audits.
+          - Each wheel passed clean-environment import, GCRANSAC homography, license, path-leak, and metadata audits.
+          - Windows wheels additionally passed PE dependency inspection.
 
           This is a prerelease. Published assets are immutable; fixes use a new tag.
           EOF
