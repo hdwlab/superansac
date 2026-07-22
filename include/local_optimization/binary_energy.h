@@ -174,21 +174,28 @@ public:
 
         const Capacity flow = maximum_flow(source_vertex, sink_vertex);
 
-        std::vector<unsigned char> source_reachable(variable_count + 2, 0);
+        // Match the legacy BK what_segment(default=SOURCE) convention. A
+        // vertex belongs to Sink only when it can still reach the sink in the
+        // residual graph; vertices that belong to neither terminal's forced
+        // set are free and therefore default to Source.
+        std::fill(levels_.begin(), levels_.end(), -1);
         bfs_queue_.clear();
-        source_reachable[source_vertex] = 1;
-        bfs_queue_.push_back(source_vertex);
+        levels_[sink_vertex] = 0;
+        bfs_queue_.push_back(sink_vertex);
         for (std::size_t head = 0; head < bfs_queue_.size(); ++head) {
             const std::size_t current = bfs_queue_[head];
             for (FlowIndex edge_index = flow_offsets_[current];
                  edge_index < flow_offsets_[current + 1]; ++edge_index) {
                 const FlowEdge& edge = flow_edges_[edge_index];
-                if (edge.residual <= Capacity{0}) {
+                // Traverse the residual graph backwards. The paired edge is
+                // target->current, so a positive residual means target can
+                // reach the current sink-reachable vertex.
+                if (flow_edges_[edge.reverse].residual <= Capacity{0}) {
                     continue;
                 }
                 const std::size_t target = edge.target;
-                if (source_reachable[target] == 0) {
-                    source_reachable[target] = 1;
+                if (levels_[target] < 0) {
+                    levels_[target] = levels_[current] + 1;
                     bfs_queue_.push_back(target);
                 }
             }
@@ -196,9 +203,9 @@ public:
 
         segments_.resize(variable_count);
         for (std::size_t variable = 0; variable < variable_count; ++variable) {
-            segments_[variable] = source_reachable[variable] != 0
-                                      ? Segment::Source
-                                      : Segment::Sink;
+            segments_[variable] = levels_[variable] >= 0
+                                      ? Segment::Sink
+                                      : Segment::Source;
         }
         minimized_ = true;
         return normalized_constant + flow;

@@ -109,6 +109,16 @@ void check_edge_cases() {
         throw std::runtime_error("Empty energy has a non-zero minimum.");
     }
 
+    // The removed BK implementation returned SOURCE for a node that was not
+    // connected to either terminal. Preserve that tie-breaking convention so
+    // degenerate minimum cuts do not change GCRANSAC's inlier set.
+    Energy free_node(1, 0);
+    free_node.add_node();
+    if (!approximately_equal(free_node.minimize(), 0.0) ||
+        free_node.get_var(0) != 0) {
+        throw std::runtime_error("A free variable did not default to Source.");
+    }
+
     Energy tie(2, 1);
     tie.add_node(2);
     tie.add_term2(0, 1, 0.0, 1.0, 1.0, 0.0);
