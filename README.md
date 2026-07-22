@@ -8,21 +8,44 @@ It provides estimators for homography, essential, fundamental matrix, rigid and 
 
 ## Installation
 
-Clone the repository and its submodules:
-```
-git clone git@github.com:danini/superansac.git
+Windows x64 wheels for CPython 3.10, 3.11, and 3.12 are published on the
+[fork's Releases page](https://github.com/hdwlab/superansac/releases). Install
+the asset matching the active Python version by its immutable release URL:
+
+```powershell
+python -m pip install https://github.com/hdwlab/superansac/releases/download/VERSION/pysuperansac-WHEEL.whl
 ```
 
-Make sure that you have the necessary OpenCV libraries installed:
+The Windows wheel contains a single extension module. SupeRANSAC and the
+required OpenCV modules are statically linked (Eigen is header-only); only the
+Python, Windows system, and supported MSVC runtime DLLs remain dynamic dependencies.
+Visual Studio, CMake, OpenCV, and vcpkg are not required on the installation
+machine.
+
+For a source build, clone this repository:
+
+```bash
+git clone https://github.com/hdwlab/superansac.git
+cd superansac
 ```
+
+Install the C++ dependencies on Ubuntu:
+
+```bash
 sudo apt-get update
-sudo apt-get install libopencv-dev libopencv-contrib-dev libarpack++2-dev libarpack2-dev libsuperlu-dev cmake build-essential libeigen3-dev
+sudo apt-get install build-essential cmake libeigen3-dev libopencv-dev
 ```
 
-Install SupeRANSAC by running 
+Build and install through the standard PEP 517 interface:
+
+```bash
+python -m pip install .
 ```
-pip install .
-```
+
+The source build supports Python 3.10 through 3.12 and requires C++17. Windows
+release builds use the pinned manifest in `vcpkg.json` and the release-only
+`x64-windows-static-md-release` triplet. See `UPSTREAM.md` before refreshing
+the fork from upstream.
 
 # Results
 
@@ -290,3 +313,11 @@ Download the [CAB scene of the LaMAR dataset](https://cvg-data.inf.ethz.ch/lamar
 
 ### Evaluation on the KITTI dataset
 Download the [KITTI odometry dataset](https://www.cvlibs.net/datasets/kitti/eval_odometry.php) (grayscale images and poses), and unzip them to your favourite location.
+
+## License and third-party software
+
+The project and binary distribution use several permissive licenses. Complete
+license texts and static-link attributions are included in
+`THIRD_PARTY_NOTICES.md` and `THIRD_PARTY_LICENSES/`, and are copied into each
+wheel. The legacy research-only graph-cut source bundle is not present in this
+revision; GCRANSAC binary energy minimization uses the in-tree MIT implementation.
