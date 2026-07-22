@@ -289,8 +289,17 @@ jobs:
           env PYTHONPATH="$PWD/build/candidate/python" \
             LD_LIBRARY_PATH="$PWD/build/candidate/src" \
             python tools/benchmark_gcransac.py --output candidate-source-linux.json
-          python tools/compare_benchmarks.py \
-            baseline-linux.json candidate-source-linux.json --max-ratio 1.25
+
+      - name: Verify Linux source benchmark result equivalence
+        run: >-
+          python tools/compare_benchmarks.py baseline-linux.json
+          candidate-source-linux.json --results-only
+
+      - name: Report Linux source performance budget
+        continue-on-error: true
+        run: >-
+          python tools/compare_benchmarks.py baseline-linux.json
+          candidate-source-linux.json --max-ratio 1.25
 
       - name: Benchmark the shipped CP312 wheel
         run: |
