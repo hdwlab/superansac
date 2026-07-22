@@ -154,9 +154,9 @@ void check_edge_cases() {
         throw std::runtime_error("Non-finite energy was accepted.");
     }
 
-    // Exercise a path deeper than typical process stack limits. The max-flow
-    // search is iterative so large, ordered neighborhoods cannot overflow the
-    // Windows thread stack.
+    // Exercise a path deeper than typical process stack limits. Deep level
+    // graphs use the iterative fallback, so large, ordered neighborhoods cannot
+    // overflow the Windows thread stack.
     constexpr std::size_t chain_length = 20000;
     Energy chain(chain_length, chain_length - 1);
     chain.add_node(chain_length);

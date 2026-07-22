@@ -409,20 +409,61 @@ private:
         }
     }
 
+    Capacity send_blocking_flow_recursive(const std::size_t current,
+                                          const std::size_t sink,
+                                          const Capacity available) {
+        if (current == sink) {
+            return available;
+        }
+
+        Capacity total = Capacity{0};
+        FlowIndex& edge_index = next_edges_[current];
+        while (edge_index < flow_offsets_[current + 1] && total < available) {
+            FlowEdge& edge = flow_edges_[edge_index];
+            if (edge.residual > Capacity{0} &&
+                levels_[edge.target] == levels_[current] + 1) {
+                const Capacity sent = send_blocking_flow_recursive(
+                    edge.target, sink,
+                    std::min(available - total, edge.residual));
+                if (sent > Capacity{0}) {
+                    edge.residual -= sent;
+                    flow_edges_[edge.reverse].residual += sent;
+                    total += sent;
+                    continue;
+                }
+            }
+            ++edge_index;
+        }
+        if (total < available) {
+            levels_[current] = -1;
+        }
+        return total;
+    }
+
     Capacity maximum_flow(const std::size_t source,
                           const std::size_t sink) {
         Capacity total = Capacity{0};
         while (build_level_graph(source, sink)) {
             std::copy(flow_offsets_.begin(), flow_offsets_.end() - 1,
                       next_edges_.begin());
-            while (true) {
-                const Capacity sent = send_flow(source, sink);
-                if (sent <= Capacity{0}) {
-                    break;
+            // Accumulate a complete blocking flow in one traversal for the
+            // shallow graphs used by GCRANSAC. Keep the iterative path search
+            // for unusually deep graphs to avoid exhausting the Windows stack.
+            constexpr int recursive_depth_limit = 256;
+            if (levels_[sink] <= recursive_depth_limit) {
+                total += send_blocking_flow_recursive(
+                    source, sink, std::numeric_limits<Capacity>::max());
+            } else {
+                while (true) {
+                    const Capacity sent = send_flow(source, sink);
+                    if (sent <= Capacity{0}) {
+                        break;
+                    }
+                    total += sent;
+                    check_finite(total, "Maximum flow");
                 }
-                total += sent;
-                check_finite(total, "Maximum flow");
             }
+            check_finite(total, "Maximum flow");
         }
         return total;
     }
